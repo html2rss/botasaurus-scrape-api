@@ -1,0 +1,3 @@
+fastapi==0.136.0
+uvicorn==0.44.0
+botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a

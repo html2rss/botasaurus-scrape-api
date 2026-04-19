@@ -1,0 +1,18 @@
+{
+  "url": "https://example.com/challenge",
+  "final_url": "https://example.com/challenge",
+  "status_code": 403,
+  "headers": {
+    "content-type": "text/html"
+  },
+  "html": "<html><body><div id=\"challenge-error-text\">Enable JavaScript and cookies to continue</div></body></html>",
+  "error": "challenge detected on final attempt",
+  "metadata_error": null,
+  "request_id": "00000000-0000-0000-0000-000000000000",
+  "attempts": 3,
+  "strategy_used": "get",
+  "render_ms": 1500,
+  "blocked_detected": true,
+  "challenge_detected": true,
+  "error_category": "challenge_block"
+}
