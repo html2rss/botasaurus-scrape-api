@@ -18,7 +18,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
-DEFAULT_SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "60"))
+DEFAULT_SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "25"))
+DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
 _MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
 _RUNTIME_ROOT = Path("/tmp/scrape")
 
@@ -60,7 +61,7 @@ class ScrapeRequest(BaseModel):
     max_retries: int = Field(default=2, ge=0, le=3)
     wait_for_selector: Optional[str] = None
     wait_timeout_seconds: int = Field(
-        default=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+        default=DEFAULT_WAIT_TIMEOUT_SECONDS,
         ge=1,
         le=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     )
