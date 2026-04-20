@@ -59,7 +59,7 @@ class MainUnitTests(unittest.TestCase):
         payload = main.ScrapeRequest(url="https://example.com")
         self.assertEqual(payload.navigation_mode, "auto")
         self.assertEqual(payload.max_retries, 2)
-        self.assertFalse(payload.block_images)
+        self.assertTrue(payload.block_images)
         self.assertFalse(payload.block_images_and_css)
         self.assertTrue(payload.wait_for_complete_page_load)
         self.assertIsNone(payload.user_agent)

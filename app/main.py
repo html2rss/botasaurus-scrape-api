@@ -64,7 +64,7 @@ class ScrapeRequest(BaseModel):
         ge=1,
         le=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     )
-    block_images: bool = False
+    block_images: bool = True
     block_images_and_css: bool = False
     wait_for_complete_page_load: bool = True
     user_agent: Optional[str] = None

@@ -105,7 +105,7 @@ Request body (full options):
   "max_retries": 2,
   "wait_for_selector": "h1",
   "wait_timeout_seconds": 15,
-  "block_images": false,
+  "block_images": true,
   "block_images_and_css": false,
   "wait_for_complete_page_load": true,
   "user_agent": "Mozilla/5.0 ...",
@@ -126,7 +126,7 @@ Request options (contract):
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture.
 - `wait_timeout_seconds`: selector wait timeout (capped by service timeout).
-- `block_images`: pass image blocking to driver.
+- `block_images`: pass image blocking to driver. Default `true`.
 
 Currently accepted passthrough options (implemented, not part of stable request-options contract):
 
