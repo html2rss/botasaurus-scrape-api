@@ -8,7 +8,7 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
   - `GET /health`
   - `POST /scrape`
 - Intended usage: run and test through Docker only.
-- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`).
+- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `25`).
 - On-demand isolation-first runtime: every scrape request runs with an ephemeral browser profile and request-scoped runtime dir, then gets fully cleaned up.
 
 ## Prerequisites
@@ -105,7 +105,7 @@ Request body (full options):
   "max_retries": 2,
   "wait_for_selector": "h1",
   "wait_timeout_seconds": 15,
-  "block_images": false,
+  "block_images": true,
   "block_images_and_css": false,
   "wait_for_complete_page_load": true,
   "user_agent": "Mozilla/5.0 ...",
@@ -125,8 +125,8 @@ Request options (contract):
   - `google_get_bypass`: only `google_get(bypass_cloudflare=true)`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture.
-- `wait_timeout_seconds`: selector wait timeout (capped by service timeout).
-- `block_images`: pass image blocking to driver.
+- `wait_timeout_seconds`: selector wait timeout (default `15`, capped by service timeout).
+- `block_images`: pass image blocking to driver. Default `true`.
 
 Currently accepted passthrough options (implemented, not part of stable request-options contract):
 
@@ -255,7 +255,7 @@ curl -s -X POST http://localhost:4010/scrape \
     "url":"https://truthsocial.com/@realDonaldTrump",
     "navigation_mode":"auto",
     "max_retries":2,
-    "wait_timeout_seconds":20,
+    "wait_timeout_seconds":15,
     "headless":false
   }'
 ```
