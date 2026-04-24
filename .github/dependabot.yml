@@ -23,3 +23,15 @@ updates:
           - "*"
     commit-message:
       prefix: "deps"
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 1
+    groups:
+      monthly-docker:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "deps"
