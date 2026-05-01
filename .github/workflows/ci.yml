@@ -17,10 +17,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Get Python version from Dockerfile
+        id: get-version
+        run: |
+          # Extract version like "3.14" from "FROM python:3.14-slim..."
+          VERSION=$(grep -m 1 "^FROM python:" Dockerfile | sed -E 's/^FROM python:([0-9]+\.[0-9]+).*/\1/')
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract Python version from Dockerfile"
+            exit 1
+          fi
+
+          echo "Extracted version: $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ steps.get-version.outputs.version }}
           cache: "pip"
 
       - name: Install Python dependencies
