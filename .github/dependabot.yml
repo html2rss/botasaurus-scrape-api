@@ -3,10 +3,13 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 1
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+    open-pull-requests-limit: 10
+    pull-request-branch-merge-strategy: "rebase"
     groups:
-      monthly-python:
+      python-dependencies:
         patterns:
           - "*"
     commit-message:
@@ -15,10 +18,13 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 1
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+    open-pull-requests-limit: 10
+    pull-request-branch-merge-strategy: "rebase"
     groups:
-      monthly-actions:
+      actions-dependencies:
         patterns:
           - "*"
     commit-message:
@@ -27,10 +33,13 @@ updates:
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
-      interval: "monthly"
-    open-pull-requests-limit: 1
+      interval: "weekly"
+      day: "monday"
+      time: "05:00"
+    open-pull-requests-limit: 10
+    pull-request-branch-merge-strategy: "rebase"
     groups:
-      monthly-docker:
+      docker-dependencies:
         patterns:
           - "*"
     commit-message:
