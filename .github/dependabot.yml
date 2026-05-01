@@ -7,7 +7,6 @@ updates:
       day: "monday"
       time: "05:00"
     open-pull-requests-limit: 10
-    pull-request-branch-merge-strategy: "rebase"
     groups:
       python-dependencies:
         patterns:
@@ -22,7 +21,6 @@ updates:
       day: "monday"
       time: "05:00"
     open-pull-requests-limit: 10
-    pull-request-branch-merge-strategy: "rebase"
     groups:
       actions-dependencies:
         patterns:
@@ -37,7 +35,6 @@ updates:
       day: "monday"
       time: "05:00"
     open-pull-requests-limit: 10
-    pull-request-branch-merge-strategy: "rebase"
     groups:
       docker-dependencies:
         patterns:
