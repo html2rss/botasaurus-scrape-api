@@ -13,8 +13,6 @@ jobs:
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
-    outputs:
-      python-version: ${{ steps.get-version.outputs.version }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
@@ -24,6 +22,12 @@ jobs:
         run: |
           # Extract version like "3.14" from "FROM python:3.14-slim..."
           VERSION=$(grep -m 1 "^FROM python:" Dockerfile | sed -E 's/^FROM python:([0-9]+\.[0-9]+).*/\1/')
+          
+          if [ -z "$VERSION" ]; then
+            echo "Error: Could not extract Python version from Dockerfile"
+            exit 1
+          fi
+
           echo "Extracted version: $VERSION"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
