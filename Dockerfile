@@ -1,5 +1,5 @@
 # Use official Python runtime pinned by digest
-FROM python:3.14-slim-bookworm@sha256:a9bee15510a364124aa24692899d269835683b883de42f7ebec8c293cf679ccb AS builder
+FROM python:3.14-slim-bookworm@sha256:a70519002c49552ea0a853de47599cf40479b001bd7a624f1112eaf44dcaccc7 AS builder
 
 WORKDIR /build
 
@@ -11,7 +11,7 @@ RUN apt-get update \
 COPY requirements.txt /build/requirements.txt
 RUN pip wheel --no-cache-dir --wheel-dir /build/wheels -r /build/requirements.txt
 
-FROM python:3.14-slim-bookworm@sha256:a9bee15510a364124aa24692899d269835683b883de42f7ebec8c293cf679ccb
+FROM python:3.14-slim-bookworm@sha256:a70519002c49552ea0a853de47599cf40479b001bd7a624f1112eaf44dcaccc7
 
 WORKDIR /app
 
