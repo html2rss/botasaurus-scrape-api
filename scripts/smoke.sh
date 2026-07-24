@@ -242,11 +242,12 @@ assert_json_key_equals "$retry_body" "strategy_used" "get" || fail "Expected fin
 assert_json_key_equals "$retry_body" "error_category" "navigation_error" || fail "Expected navigation_error category"
 
 echo "[smoke] Checking per-request isolation (no cookie leak)"
-set_cookie_response="$(http_post "/scrape" '{"url":"https://httpbin.org/cookies/set?isotest=1","navigation_mode":"get","max_retries":0}')"
+# Use httpbingo (httpbin.org is often down). headless=true avoids xvfb hangs on the Set-Cookie redirect.
+set_cookie_response="$(http_post "/scrape" '{"url":"https://httpbingo.org/cookies/set?isotest=1","navigation_mode":"get","max_retries":0,"headless":true}')"
 set_cookie_code="$(echo "$set_cookie_response" | tail -n1)"
 [[ "$set_cookie_code" == "200" ]] || fail "Expected cookie set scrape 200, got ${set_cookie_code}"
 
-check_cookie_response="$(http_post "/scrape" '{"url":"https://httpbin.org/cookies","navigation_mode":"get","max_retries":0}')"
+check_cookie_response="$(http_post "/scrape" '{"url":"https://httpbingo.org/cookies","navigation_mode":"get","max_retries":0,"headless":true}')"
 check_cookie_body="$(echo "$check_cookie_response" | sed '$d')"
 check_cookie_code="$(echo "$check_cookie_response" | tail -n1)"
 [[ "$check_cookie_code" == "200" ]] || fail "Expected cookie check scrape 200, got ${check_cookie_code}"
