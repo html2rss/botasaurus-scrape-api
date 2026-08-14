@@ -250,7 +250,11 @@ def _fetch_metadata(
         if request_client is None or not hasattr(request_client, "get"):
             raise RuntimeError("driver.requests.get is unavailable")
 
-        response = request_client.get(target_url)
+        try:
+            response = request_client.get(target_url, timeout=3)
+        except TypeError:
+            response = request_client.get(target_url)
+
         status_code = getattr(response, "status_code", None)
         response_headers = getattr(response, "headers", None)
 
@@ -312,11 +316,18 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
             try:
-                _navigate(driver, target_url, strategy, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+                remaining_budget = max(
+                    1,
+                    int(
+                        DEFAULT_SCRAPE_TIMEOUT_SECONDS
+                        - (time.monotonic() - started_monotonic)
+                    ),
+                )
+                _navigate(driver, target_url, strategy, remaining_budget)
                 _wait_for_readiness(
                     driver,
                     selector=payload.wait_for_selector,
-                    timeout_seconds=payload.wait_timeout_seconds,
+                    timeout_seconds=min(payload.wait_timeout_seconds, remaining_budget),
                 )
 
                 html = driver.page_html or ""
