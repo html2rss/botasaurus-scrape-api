@@ -142,6 +142,46 @@ class MainUnitTests(unittest.TestCase):
             _CaptureDriver.last_init_kwargs["proxy"], "http://proxy.example:8080"
         )
 
+    def test_extract_passive_metadata_from_requests_list(self):
+        class _Req:
+            def __init__(self, status, headers, url):
+                self.response = type("Resp", (), {"status_code": status, "headers": headers})()
+                self.url = url
+
+        driver = type("D", (), {"requests": [_Req(200, {"content-type": "text/html"}, "https://example.com/final")]})()
+        status, headers, final_url = main._extract_passive_metadata(driver, "https://example.com")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers, {"content-type": "text/html"})
+        self.assertEqual(final_url, "https://example.com/final")
+
+    def test_extract_passive_metadata_from_performance_logs(self):
+        import json
+
+        perf_log = [
+            {
+                "message": json.dumps(
+                    {
+                        "message": {
+                            "method": "Network.responseReceived",
+                            "params": {
+                                "response": {
+                                    "status": 200,
+                                    "headers": {"content-type": "text/html"},
+                                    "url": "https://example.com/cdp-final",
+                                    "type": "Document",
+                                }
+                            },
+                        }
+                    }
+                )
+            }
+        ]
+        driver = type("D", (), {"get_log": lambda log_type: perf_log if log_type == "performance" else []})()
+        status, headers, final_url = main._extract_passive_metadata(driver, "https://example.com")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers, {"content-type": "text/html"})
+        self.assertEqual(final_url, "https://example.com/cdp-final")
+
     def test_is_blocked_ip_allows_well_known_nat64_prefix(self):
         nat64_ip = ipaddress.ip_address("64:ff9b::3691:8e03")
         self.assertFalse(main._is_blocked_ip(nat64_ip))

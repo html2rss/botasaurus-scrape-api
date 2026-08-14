@@ -238,36 +238,78 @@ def _detect_block_challenge(html: str, status_code: Optional[int]) -> tuple[bool
     return blocked_detected, challenge_detected
 
 
+def _extract_passive_metadata(
+    driver: Driver, target_url: str
+) -> tuple[Optional[int], Optional[dict[str, str]], Optional[str]]:
+    reqs = getattr(driver, "requests", None)
+    if isinstance(reqs, (list, tuple)) and reqs:
+        for req in reversed(reqs):
+            resp = getattr(req, "response", None)
+            if resp:
+                status_code = getattr(resp, "status_code", None)
+                headers = getattr(resp, "headers", None)
+                req_url = getattr(req, "url", None)
+                if status_code is not None:
+                    hdr_dict = {str(k): str(v) for k, v in dict(headers).items()} if headers else None
+                    return int(status_code), hdr_dict, str(req_url) if req_url else None
+
+    get_log = getattr(driver, "get_log", None)
+    if callable(get_log):
+        try:
+            import json
+
+            logs = get_log("performance")
+            for entry in reversed(logs):
+                msg = json.loads(entry.get("message", "{}")).get("message", {})
+                if msg.get("method") == "Network.responseReceived":
+                    resp = msg.get("params", {}).get("response", {})
+                    if resp.get("type") in ("Document", "Other") or not resp.get("type"):
+                        status_code = resp.get("status")
+                        headers = resp.get("headers")
+                        url = resp.get("url")
+                        if status_code:
+                            hdr_dict = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
+                            return int(status_code), hdr_dict, str(url) if url else None
+        except Exception:
+            pass
+
+    return None, None, None
+
+
 def _fetch_metadata(
     driver: Driver, target_url: str
 ) -> tuple[Optional[int], Optional[dict[str, str]], str, Optional[str]]:
-    status_code: Optional[int] = None
-    headers: Optional[dict[str, str]] = None
     final_url = getattr(driver, "current_url", None) or target_url
 
+    # 1. Attempt passive CDP / network interception first (zero extra network calls)
+    try:
+        status_code, headers, passive_url = _extract_passive_metadata(driver, target_url)
+        if status_code is not None:
+            return status_code, headers, passive_url or str(final_url), None
+    except Exception:
+        pass
+
+    # 2. Fallback to active requests.get if driver provides it
     try:
         request_client = getattr(driver, "requests", None)
-        if request_client is None or not hasattr(request_client, "get"):
-            raise RuntimeError("driver.requests.get is unavailable")
+        if request_client is not None and hasattr(request_client, "get"):
+            try:
+                response = request_client.get(target_url, timeout=3)
+            except TypeError:
+                response = request_client.get(target_url)
 
-        try:
-            response = request_client.get(target_url, timeout=3)
-        except TypeError:
-            response = request_client.get(target_url)
+            status_code = getattr(response, "status_code", None)
+            response_headers = getattr(response, "headers", None)
+            headers = {str(k): str(v) for k, v in dict(response_headers).items()} if response_headers else None
+            response_url = getattr(response, "url", None)
+            if response_url:
+                final_url = str(response_url)
 
-        status_code = getattr(response, "status_code", None)
-        response_headers = getattr(response, "headers", None)
-
-        if response_headers:
-            headers = {str(k): str(v) for k, v in dict(response_headers).items()}
-
-        response_url = getattr(response, "url", None)
-        if response_url:
-            final_url = str(response_url)
-
-        return status_code, headers, final_url, None
+            return status_code, headers, str(final_url), None
     except Exception as exc:  # best-effort metadata only
-        return status_code, headers, str(final_url), str(exc)
+        return None, None, str(final_url), str(exc)
+
+    return None, None, str(final_url), None
 
 
 def _register_request_id(request_id: str) -> None:
