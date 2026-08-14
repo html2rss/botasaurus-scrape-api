@@ -276,6 +276,7 @@ def _extract_passive_metadata(
                                 hdr_dict = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
                                 return int(status_code), hdr_dict, str(url) if url else None
         except Exception:
+            # Performance logs or CDP responses may be unsupported or malformed; continue fallback.
             pass
 
     return None, None, None
@@ -292,6 +293,7 @@ def _fetch_metadata(
         if status_code is not None:
             return status_code, headers, passive_url or str(final_url), None
     except Exception:
+        # Passive metadata extraction is best-effort; fall back to active requests.get if supported.
         pass
 
     # 2. Fallback to active requests.get if driver provides it
