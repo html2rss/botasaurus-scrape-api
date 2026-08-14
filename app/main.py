@@ -259,17 +259,22 @@ def _extract_passive_metadata(
             import json
 
             logs = get_log("performance")
-            for entry in reversed(logs):
-                msg = json.loads(entry.get("message", "{}")).get("message", {})
-                if msg.get("method") == "Network.responseReceived":
-                    resp = msg.get("params", {}).get("response", {})
-                    if resp.get("type") in ("Document", "Other") or not resp.get("type"):
-                        status_code = resp.get("status")
-                        headers = resp.get("headers")
-                        url = resp.get("url")
-                        if status_code:
-                            hdr_dict = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
-                            return int(status_code), hdr_dict, str(url) if url else None
+            if isinstance(logs, list):
+                for entry in reversed(logs):
+                    raw_msg = entry.get("message", "{}") if isinstance(entry, dict) else "{}"
+                    msg_obj = json.loads(raw_msg) if isinstance(raw_msg, str) else raw_msg
+                    msg = msg_obj.get("message", {}) if isinstance(msg_obj, dict) else {}
+                    if msg.get("method") == "Network.responseReceived":
+                        params = msg.get("params", {})
+                        resp = params.get("response", {})
+                        res_type = params.get("type") or resp.get("type")
+                        if res_type in ("Document", "Other", None) or not res_type:
+                            status_code = resp.get("status")
+                            headers = resp.get("headers")
+                            url = resp.get("url")
+                            if status_code is not None:
+                                hdr_dict = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
+                                return int(status_code), hdr_dict, str(url) if url else None
         except Exception:
             pass
 

@@ -164,19 +164,23 @@ class MainUnitTests(unittest.TestCase):
                         "message": {
                             "method": "Network.responseReceived",
                             "params": {
+                                "type": "Document",
                                 "response": {
                                     "status": 200,
                                     "headers": {"content-type": "text/html"},
                                     "url": "https://example.com/cdp-final",
-                                    "type": "Document",
-                                }
+                                },
                             },
                         }
                     }
                 )
             }
         ]
-        driver = type("D", (), {"get_log": lambda log_type: perf_log if log_type == "performance" else []})()
+        driver = type(
+            "D",
+            (),
+            {"get_log": lambda self, log_type: perf_log if log_type == "performance" else []},
+        )()
         status, headers, final_url = main._extract_passive_metadata(driver, "https://example.com")
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
