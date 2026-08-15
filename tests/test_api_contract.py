@@ -7,6 +7,10 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from app import main
+from app.detector import ChallengeDetector
+from app.engine import ScraperEngine
+from app.metadata import MetadataExtractor
+from app.security import UrlGuard
 
 
 class _FakeMetadataResponse:
@@ -106,7 +110,8 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
-            with patch.object(main, "_RUNTIME_ROOT", runtime_root), patch.object(main, "Driver", _FakeDriver):
+            engine = ScraperEngine(runtime_root=runtime_root)
+            with patch.object(main, "_engine", engine), patch("app.engine.Driver", _FakeDriver):
                 result = main._run_scrape(payload)
 
             self.assertEqual(result["error_category"], "navigation_error")
@@ -129,9 +134,8 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
-            with patch.object(main, "_RUNTIME_ROOT", runtime_root), patch.object(
-                main, "Driver", _CaptureDriver
-            ):
+            engine = ScraperEngine(runtime_root=runtime_root)
+            with patch.object(main, "_engine", engine), patch("app.engine.Driver", _CaptureDriver):
                 result = main._run_scrape(payload)
 
         self.assertIsNone(result["error"])
@@ -200,6 +204,77 @@ class MainUnitTests(unittest.TestCase):
     def test_is_blocked_ip_still_blocks_loopback(self):
         loopback = ipaddress.ip_address("127.0.0.1")
         self.assertTrue(main._is_blocked_ip(loopback))
+
+
+class UrlGuardUnitTests(unittest.TestCase):
+    def test_validate_rejects_non_http_schemes(self):
+        res = UrlGuard.validate("ftp://example.com/file")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Only http/https", res.error_message)
+
+    def test_validate_rejects_missing_hostname(self):
+        res = UrlGuard.validate("http://")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 400)
+
+    def test_validate_rejects_localhost(self):
+        res = UrlGuard.validate("http://localhost:8080/test")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 403)
+
+    def test_validate_proxy_rejects_blocked_host(self):
+        res = UrlGuard.validate_proxy("http://127.0.0.1:8080")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("Proxy URL is invalid or blocked", res.error_message)
+
+
+class ChallengeDetectorUnitTests(unittest.TestCase):
+    def test_detects_challenge_marker_and_category(self):
+        res = ChallengeDetector.detect("<html>Just a moment...</html>", 200)
+        self.assertTrue(res.challenge_detected)
+        self.assertTrue(res.blocked_detected)
+        self.assertEqual(res.detected_marker, "Just a moment...")
+        self.assertEqual(res.error_category, "challenge_block")
+        self.assertFalse(res.is_clean)
+
+    def test_detects_http_status_block_without_marker(self):
+        res = ChallengeDetector.detect("<html>Forbidden</html>", 403)
+        self.assertFalse(res.challenge_detected)
+        self.assertTrue(res.blocked_detected)
+        self.assertIsNone(res.detected_marker)
+        self.assertEqual(res.error_category, "challenge_block")
+        self.assertFalse(res.is_clean)
+
+    def test_clean_response(self):
+        res = ChallengeDetector.detect("<html><h1>Hello</h1></html>", 200)
+        self.assertTrue(res.is_clean)
+        self.assertFalse(res.blocked_detected)
+        self.assertFalse(res.challenge_detected)
+        self.assertIsNone(res.error_category)
+
+
+class MetadataExtractorUnitTests(unittest.TestCase):
+    def test_extract_falls_back_to_200_when_no_driver_metadata(self):
+        driver = type("EmptyDriver", (), {"current_url": "https://example.com/dest"})()
+        meta = MetadataExtractor.fetch(driver, "https://example.com")
+        self.assertEqual(meta.status_code, 200)
+        self.assertEqual(meta.final_url, "https://example.com/dest")
+        self.assertIsNone(meta.headers)
+        self.assertIsNone(meta.metadata_error)
+
+
+class ScraperEngineUnitTests(unittest.TestCase):
+    def test_request_id_collision_raises(self):
+        engine = ScraperEngine()
+        engine.register_request_id("req-123")
+        with self.assertRaises(RuntimeError):
+            engine.register_request_id("req-123")
+        engine.unregister_request_id("req-123")
+        # Should be re-registerable after unregistering
+        engine.register_request_id("req-123")
+        engine.unregister_request_id("req-123")
 
 
 if __name__ == "__main__":
