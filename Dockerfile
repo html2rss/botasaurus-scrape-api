@@ -28,6 +28,8 @@ COPY --from=builder /build/wheels /wheels
 RUN grep -v '^botasaurus @ git+' /app/requirements.txt > /app/requirements.runtime.txt \
     && echo 'botasaurus' >> /app/requirements.runtime.txt \
     && pip install --no-cache-dir --no-index --find-links /wheels -r /app/requirements.runtime.txt \
+    && python3 -c "import botasaurus.request" \
+    && chmod -R a+rx /usr/local/lib/python3.14/site-packages \
     && rm -f /app/requirements.runtime.txt \
     && rm -rf /wheels
 

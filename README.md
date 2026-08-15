@@ -101,14 +101,23 @@ Request body (full options):
 ```json
 {
   "url": "https://example.com",
+  "execution_mode": "auto",
   "navigation_mode": "auto",
   "max_retries": 2,
   "wait_for_selector": "h1",
   "wait_timeout_seconds": 15,
   "block_images": true,
   "block_images_and_css": false,
+  "block_trackers": true,
   "wait_for_complete_page_load": true,
   "user_agent": "Mozilla/5.0 ...",
+  "headers": {
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cookie": "session=..."
+  },
+  "cookies": {
+    "session": "..."
+  },
   "window_size": [1920, 1080],
   "lang": "en-US",
   "headless": false,
@@ -118,15 +127,22 @@ Request body (full options):
 
 Request options (contract):
 
+- `execution_mode`:
+  - `auto` (default): attempts fast anti-detect HTTP request (`curl_cffi` / TLS fingerprinting) first; escalates to real browser driver if challenge or dynamic hydration is required.
+  - `request`: anti-detect HTTP request tier only (fastest, low memory).
+  - `browser`: full headless/stealth Chromium browser tier.
 - `navigation_mode`:
   - `auto` (default): `google_get` -> `google_get(bypass_cloudflare=true)` -> `get`
   - `get`: only `get`
   - `google_get`: only `google_get`
   - `google_get_bypass`: only `google_get(bypass_cloudflare=true)`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
-- `wait_for_selector`: if set, response waits for selector before capture.
+- `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
 - `wait_timeout_seconds`: selector wait timeout (default `15`, capped by service timeout).
 - `block_images`: pass image blocking to driver. Default `true`.
+- `block_trackers`: block tracking/ad networks and web fonts to speed up rendering. Default `true`.
+- `headers`: custom HTTP request headers forwarded to request client or browser session.
+- `cookies`: key-value cookies map forwarded to request client or browser session.
 
 Currently accepted passthrough options (implemented, not part of stable request-options contract):
 
@@ -153,11 +169,13 @@ Success response shape (legacy fields preserved, additive diagnostics included):
   "metadata_error": null,
   "request_id": "b01ef2f8-f641-4e75-8ef2-0b73f7b4f372",
   "attempts": 1,
-  "strategy_used": "google_get",
-  "render_ms": 1268,
+  "strategy_used": "anti_detect_request",
+  "render_ms": 154,
   "blocked_detected": false,
   "challenge_detected": false,
-  "error_category": null
+  "error_category": null,
+  "execution_tier": "http_request",
+  "detected_challenge": null
 }
 ```
 
@@ -172,6 +190,8 @@ Field behavior:
 - `strategy_used`: strategy used on final attempt.
 - `render_ms`: elapsed render/runtime milliseconds.
 - `blocked_detected` / `challenge_detected`: anti-bot signal flags from HTML/status markers.
+- `execution_tier`: `http_request` or `browser_driver`.
+- `detected_challenge`: specific challenge marker matched, if any.
 - `error_category`:
   - `timeout`
   - `challenge_block`
