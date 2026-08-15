@@ -159,8 +159,12 @@ def _error_payload(
 
 def _is_blocked_ip(ip: ipaddress._BaseAddress) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64_WELL_KNOWN_PREFIX:
-        # Public NAT64-translated destinations should not be blocked as reserved.
-        return False
+        # Validate the embedded IPv4 address for NAT64 translated destinations
+        try:
+            embedded_ipv4 = ipaddress.IPv4Address(ip.packed[-4:])
+            return _is_blocked_ip(embedded_ipv4)
+        except ValueError:
+            return True
 
     return (
         ip.is_loopback
@@ -522,6 +526,22 @@ def _run_browser_scrape(
             except Exception:
                 pass
 
+        if payload.cookies:
+            try:
+                for c_name, c_val in payload.cookies.items():
+                    try:
+                        driver.add_cookies([{"name": str(c_name), "value": str(c_val), "url": target_url}])
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        if payload.headers and hasattr(driver, "_tab"):
+            try:
+                driver._tab.set_extra_http_headers(payload.headers)
+            except Exception:
+                pass
+
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
             try:
@@ -548,31 +568,41 @@ def _run_browser_scrape(
                 blocked_detected, challenge_detected, detected_marker = (
                     _detect_block_challenge(html, status_code)
                 )
+
+                if challenge_detected or blocked_detected:
+                    logger.warning(
+                        "scrape_challenge_detected request_id=%s host=%s strategy=%s attempt=%d marker=%s",
+                        request_id,
+                        urlparse(target_url).hostname,
+                        strategy,
+                        attempt_index,
+                        detected_marker,
+                    )
+                    if attempt_index < len(strategies):
+                        continue
+
+                    render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                    return {
+                        "url": target_url,
+                        "final_url": final_url,
+                        "status_code": status_code,
+                        "headers": headers,
+                        "html": html,
+                        "error": f"Bot challenge detected ({detected_marker or 'unknown'})",
+                        "metadata_error": metadata_error,
+                        "request_id": request_id,
+                        "attempts": attempts,
+                        "strategy_used": strategy,
+                        "render_ms": render_ms,
+                        "blocked_detected": blocked_detected,
+                        "challenge_detected": challenge_detected,
+                        "error_category": "challenge_block",
+                        "execution_tier": "browser_driver",
+                        "detected_challenge": detected_marker,
+                    }
+
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)
-
-                logger.info(
-                    "scrape_attempt request_id=%s host=%s mode=%s strategy=%s attempt=%d blocked=%s challenge=%s",
-                    request_id,
-                    urlparse(target_url).hostname,
-                    payload.navigation_mode,
-                    strategy,
-                    attempt_index,
-                    blocked_detected,
-                    challenge_detected,
-                )
-
-                if (
-                    payload.navigation_mode == "auto"
-                    and blocked_detected
-                    and attempt_index < len(strategies)
-                ):
-                    continue
-
-                metadata_error_category: Optional[ErrorCategory] = None
-                if metadata_error is not None:
-                    metadata_error_category = "metadata_error"
-
-                result = {
+                return {
                     "url": target_url,
                     "final_url": final_url,
                     "status_code": status_code,
@@ -581,21 +611,15 @@ def _run_browser_scrape(
                     "error": None,
                     "metadata_error": metadata_error,
                     "request_id": request_id,
-                    "attempts": attempt_index,
+                    "attempts": attempts,
                     "strategy_used": strategy,
                     "render_ms": render_ms,
-                    "blocked_detected": blocked_detected,
-                    "challenge_detected": challenge_detected,
-                    "error_category": metadata_error_category,
+                    "blocked_detected": False,
+                    "challenge_detected": False,
+                    "error_category": None,
                     "execution_tier": "browser_driver",
-                    "detected_challenge": detected_marker,
+                    "detected_challenge": None,
                 }
-
-                if blocked_detected:
-                    result["error"] = "Challenge block detected"
-                    result["error_category"] = "challenge_block"
-
-                return result
             except Exception as exc:
                 logger.warning(
                     "scrape_attempt_failed request_id=%s host=%s mode=%s strategy=%s attempt=%d error=%s",
@@ -606,24 +630,26 @@ def _run_browser_scrape(
                     attempt_index,
                     str(exc),
                 )
+                if attempt_index < len(strategies):
+                    continue
 
-                if attempt_index == len(strategies):
-                    render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                    return _error_payload(
-                        target_url,
-                        str(exc),
-                        request_id=request_id,
-                        attempts=attempt_index,
-                        strategy_used=strategy,
-                        render_ms=render_ms,
-                        error_category="navigation_error",
-                        execution_tier="browser_driver",
-                    )
+                render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                category = "timeout" if "timeout" in str(exc).lower() else "navigation_error"
+                return _error_payload(
+                    target_url,
+                    str(exc),
+                    request_id=request_id,
+                    attempts=attempts,
+                    strategy_used=strategy,
+                    render_ms=render_ms,
+                    error_category=category,
+                    execution_tier="browser_driver",
+                )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
         return _error_payload(
             target_url,
-            "Scrape failed for unknown reason",
+            "Scrape failed after all strategy attempts",
             request_id=request_id,
             attempts=attempts,
             strategy_used=strategies[-1] if strategies else None,
@@ -639,10 +665,23 @@ def _run_browser_scrape(
             shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
-def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
+def _run_scrape(
+    payload: ScrapeRequest, deadline_monotonic: Optional[float] = None
+) -> dict[str, Any]:
     target_url = str(payload.url)
     request_id = str(uuid.uuid4())
     started_monotonic = time.monotonic()
+
+    if deadline_monotonic and started_monotonic >= deadline_monotonic:
+        return _error_payload(
+            target_url,
+            "Scrape timed out in threadpool queue before execution started",
+            request_id=request_id,
+            attempts=0,
+            strategy_used=None,
+            render_ms=0,
+            error_category="timeout",
+        )
 
     _register_request_id(request_id)
     try:
@@ -728,12 +767,24 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
             ),
         )
 
+    if payload.proxy:
+        proxy_url = str(payload.proxy)
+        is_allowed_proxy, proxy_status, proxy_error = _validate_target_url(proxy_url)
+        if not is_allowed_proxy:
+            return JSONResponse(
+                status_code=proxy_status,
+                content=_validation_error_payload(
+                    target_url, f"Proxy URL is invalid or blocked: {proxy_error}"
+                ),
+            )
+
     started_monotonic = time.monotonic()
+    deadline_monotonic = started_monotonic + DEFAULT_SCRAPE_TIMEOUT_SECONDS
 
     try:
         loop = asyncio.get_running_loop()
         result = await asyncio.wait_for(
-            loop.run_in_executor(_executor, _run_scrape, payload),
+            loop.run_in_executor(_executor, _run_scrape, payload, deadline_monotonic),
             timeout=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
