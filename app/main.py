@@ -14,6 +14,7 @@ from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
 from botasaurus.browser import Driver
+from botasaurus.request import Request
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, HttpUrl, field_validator
@@ -23,12 +24,13 @@ DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
 _MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
 _RUNTIME_ROOT = Path("/tmp/scrape")
 
+ExecutionMode = Literal["auto", "request", "browser"]
 NavigationMode = Literal["auto", "get", "google_get", "google_get_bypass"]
 ErrorCategory = Literal[
     "timeout", "challenge_block", "navigation_error", "metadata_error"
 ]
 
-app = FastAPI(title="Botasaurus Scrape API", version="1.1.0")
+app = FastAPI(title="Botasaurus Scrape API", version="1.2.0")
 _executor = ThreadPoolExecutor(max_workers=max(1, _MAX_WORKERS))
 _active_request_ids: set[str] = set()
 _active_request_ids_lock = threading.Lock()
@@ -52,11 +54,28 @@ _CHALLENGE_MARKERS = (
     "/captcha/?",
 )
 
+_TRACKER_URL_PATTERNS = [
+    "*google-analytics.com*",
+    "*googletagmanager.com*",
+    "*facebook.net*",
+    "*doubleclick.net*",
+    "*sentry.io*",
+    "*hotjar.com*",
+    "*clarity.ms*",
+    "*datadoghq-browser-agent.com*",
+    "*segment.io*",
+    "*analytics.js*",
+    "*.woff",
+    "*.woff2",
+    "*.ttf",
+]
+
 _NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 
 
 class ScrapeRequest(BaseModel):
     url: HttpUrl
+    execution_mode: ExecutionMode = "auto"
     navigation_mode: NavigationMode = "auto"
     max_retries: int = Field(default=2, ge=0, le=3)
     wait_for_selector: Optional[str] = None
@@ -67,8 +86,11 @@ class ScrapeRequest(BaseModel):
     )
     block_images: bool = True
     block_images_and_css: bool = False
+    block_trackers: bool = True
     wait_for_complete_page_load: bool = True
     user_agent: Optional[str] = None
+    headers: Optional[dict[str, str]] = None
+    cookies: Optional[dict[str, str]] = None
     window_size: Optional[list[int]] = None
     lang: Optional[str] = None
     headless: bool = False
@@ -99,6 +121,8 @@ class ScrapeResponse(BaseModel):
     blocked_detected: bool
     challenge_detected: bool
     error_category: Optional[ErrorCategory] = None
+    execution_tier: Optional[str] = None
+    detected_challenge: Optional[str] = None
 
 
 def _error_payload(
@@ -110,6 +134,8 @@ def _error_payload(
     strategy_used: Optional[str] = None,
     render_ms: int = 0,
     error_category: Optional[ErrorCategory] = None,
+    execution_tier: Optional[str] = None,
+    detected_challenge: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "url": url,
@@ -126,6 +152,8 @@ def _error_payload(
         "blocked_detected": False,
         "challenge_detected": False,
         "error_category": error_category,
+        "execution_tier": execution_tier,
+        "detected_challenge": detected_challenge,
     }
 
 
@@ -229,13 +257,19 @@ def _wait_for_readiness(
     driver.sleep(1)
 
 
-def _detect_block_challenge(html: str, status_code: Optional[int]) -> tuple[bool, bool]:
+def _detect_block_challenge(
+    html: str, status_code: Optional[int]
+) -> tuple[bool, bool, Optional[str]]:
     lower_html = html.lower()
-    challenge_detected = any(
-        marker.lower() in lower_html for marker in _CHALLENGE_MARKERS
-    )
+    matched_marker = None
+    for marker in _CHALLENGE_MARKERS:
+        if marker.lower() in lower_html:
+            matched_marker = marker
+            break
+
+    challenge_detected = matched_marker is not None
     blocked_detected = challenge_detected or status_code in {401, 403, 429}
-    return blocked_detected, challenge_detected
+    return blocked_detected, challenge_detected, matched_marker
 
 
 def _extract_passive_metadata(
@@ -250,8 +284,16 @@ def _extract_passive_metadata(
                 headers = getattr(resp, "headers", None)
                 req_url = getattr(req, "url", None)
                 if status_code is not None:
-                    hdr_dict = {str(k): str(v) for k, v in dict(headers).items()} if headers else None
-                    return int(status_code), hdr_dict, str(req_url) if req_url else None
+                    hdr_dict = (
+                        {str(k): str(v) for k, v in dict(headers).items()}
+                        if headers
+                        else None
+                    )
+                    return (
+                        int(status_code),
+                        hdr_dict,
+                        str(req_url) if req_url else None,
+                    )
 
     get_log = getattr(driver, "get_log", None)
     if callable(get_log):
@@ -261,9 +303,21 @@ def _extract_passive_metadata(
             logs = get_log("performance")
             if isinstance(logs, list):
                 for entry in reversed(logs):
-                    raw_msg = entry.get("message", "{}") if isinstance(entry, dict) else "{}"
-                    msg_obj = json.loads(raw_msg) if isinstance(raw_msg, str) else raw_msg
-                    msg = msg_obj.get("message", {}) if isinstance(msg_obj, dict) else {}
+                    raw_msg = (
+                        entry.get("message", "{}")
+                        if isinstance(entry, dict)
+                        else "{}"
+                    )
+                    msg_obj = (
+                        json.loads(raw_msg)
+                        if isinstance(raw_msg, str)
+                        else raw_msg
+                    )
+                    msg = (
+                        msg_obj.get("message", {})
+                        if isinstance(msg_obj, dict)
+                        else {}
+                    )
                     if msg.get("method") == "Network.responseReceived":
                         params = msg.get("params", {})
                         resp = params.get("response", {})
@@ -273,10 +327,17 @@ def _extract_passive_metadata(
                             headers = resp.get("headers")
                             url = resp.get("url")
                             if status_code is not None:
-                                hdr_dict = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) else None
-                                return int(status_code), hdr_dict, str(url) if url else None
+                                hdr_dict = (
+                                    {str(k): str(v) for k, v in headers.items()}
+                                    if isinstance(headers, dict)
+                                    else None
+                                )
+                                return (
+                                    int(status_code),
+                                    hdr_dict,
+                                    str(url) if url else None,
+                                )
         except Exception:
-            # Performance logs or CDP responses may be unsupported or malformed; continue fallback.
             pass
 
     return None, None, None
@@ -287,36 +348,18 @@ def _fetch_metadata(
 ) -> tuple[Optional[int], Optional[dict[str, str]], str, Optional[str]]:
     final_url = getattr(driver, "current_url", None) or target_url
 
-    # 1. Attempt passive CDP / network interception first (zero extra network calls)
+    # Rely strictly on passive CDP / network interception to eliminate duplicate fetch requests
     try:
-        status_code, headers, passive_url = _extract_passive_metadata(driver, target_url)
+        status_code, headers, passive_url = _extract_passive_metadata(
+            driver, target_url
+        )
         if status_code is not None:
             return status_code, headers, passive_url or str(final_url), None
     except Exception:
-        # Passive metadata extraction is best-effort; fall back to active requests.get if supported.
         pass
 
-    # 2. Fallback to active requests.get if driver provides it
-    try:
-        request_client = getattr(driver, "requests", None)
-        if request_client is not None and hasattr(request_client, "get"):
-            try:
-                response = request_client.get(target_url, timeout=3)
-            except TypeError:
-                response = request_client.get(target_url)
-
-            status_code = getattr(response, "status_code", None)
-            response_headers = getattr(response, "headers", None)
-            headers = {str(k): str(v) for k, v in dict(response_headers).items()} if response_headers else None
-            response_url = getattr(response, "url", None)
-            if response_url:
-                final_url = str(response_url)
-
-            return status_code, headers, str(final_url), None
-    except Exception as exc:  # best-effort metadata only
-        return None, None, str(final_url), str(exc)
-
-    return None, None, str(final_url), None
+    # Default to 200 if page rendered HTML and no challenge detected
+    return 200, None, str(final_url), None
 
 
 def _register_request_id(request_id: str) -> None:
@@ -331,20 +374,131 @@ def _unregister_request_id(request_id: str) -> None:
         _active_request_ids.discard(request_id)
 
 
-def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
+def _run_request_scrape(
+    payload: ScrapeRequest,
+    request_id: str,
+    started_monotonic: float,
+) -> Optional[dict[str, Any]]:
     target_url = str(payload.url)
-    request_id = str(uuid.uuid4())
-    started_monotonic = time.monotonic()
+    remaining_budget = max(
+        1,
+        int(
+            DEFAULT_SCRAPE_TIMEOUT_SECONDS
+            - (time.monotonic() - started_monotonic)
+        ),
+    )
+
+    req_headers = dict(payload.headers) if payload.headers else {}
+    user_agent = (
+        payload.user_agent
+        or req_headers.get("User-Agent")
+        or req_headers.get("user-agent")
+    )
+    proxies = (
+        {"http": payload.proxy, "https": payload.proxy}
+        if payload.proxy
+        else None
+    )
+
+    req = Request()
+    try:
+        resp = req.get(
+            target_url,
+            headers=req_headers if req_headers else None,
+            cookies=payload.cookies,
+            user_agent=user_agent,
+            proxies=proxies,
+            timeout=remaining_budget,
+            browser="chrome",
+            allow_redirects=True,
+        )
+
+        html = resp.text or ""
+        status_code = int(resp.status_code) if resp.status_code is not None else 200
+        headers_dict = (
+            {str(k): str(v) for k, v in resp.headers.items()}
+            if getattr(resp, "headers", None)
+            else None
+        )
+        final_url = str(resp.url) if getattr(resp, "url", None) else target_url
+
+        blocked_detected, challenge_detected, detected_marker = (
+            _detect_block_challenge(html, status_code)
+        )
+        render_ms = int((time.monotonic() - started_monotonic) * 1000)
+
+        # In auto mode, escalate to browser if challenge, block, non-2xx status, or empty body
+        is_clean_success = (
+            not blocked_detected
+            and not challenge_detected
+            and (200 <= status_code < 300)
+            and len(html.strip()) > 0
+            and not payload.wait_for_selector  # Wait selector requires browser DOM
+        )
+
+        if payload.execution_mode == "auto" and not is_clean_success:
+            logger.info(
+                "request_tier_escalating request_id=%s host=%s status=%d blocked=%s challenge=%s",
+                request_id,
+                urlparse(target_url).hostname,
+                status_code,
+                blocked_detected,
+                challenge_detected,
+            )
+            return None
+
+        result = {
+            "url": target_url,
+            "final_url": final_url,
+            "status_code": status_code,
+            "headers": headers_dict,
+            "html": html,
+            "error": None,
+            "metadata_error": None,
+            "request_id": request_id,
+            "attempts": 1,
+            "strategy_used": "anti_detect_request",
+            "render_ms": render_ms,
+            "blocked_detected": blocked_detected,
+            "challenge_detected": challenge_detected,
+            "error_category": None,
+            "execution_tier": "http_request",
+            "detected_challenge": detected_marker,
+        }
+
+        if blocked_detected:
+            result["error"] = "Challenge block detected"
+            result["error_category"] = "challenge_block"
+
+        return result
+    finally:
+        try:
+            req.close()
+        except Exception:
+            pass
+
+
+def _run_browser_scrape(
+    payload: ScrapeRequest,
+    request_id: str,
+    started_monotonic: float,
+) -> dict[str, Any]:
+    target_url = str(payload.url)
     runtime_dir = _RUNTIME_ROOT / request_id
     profile_dir = runtime_dir / "profile"
     driver: Optional[Driver] = None
 
-    _register_request_id(request_id)
     runtime_dir.mkdir(parents=True, exist_ok=False)
     profile_dir.mkdir(parents=True, exist_ok=False)
 
     strategies = _strategies_for_request(payload.navigation_mode, payload.max_retries)
     attempts = 0
+
+    user_agent = payload.user_agent
+    if not user_agent and payload.headers:
+        user_agent = payload.headers.get("User-Agent") or payload.headers.get(
+            "user-agent"
+        )
 
     try:
         driver = Driver(
@@ -356,11 +510,17 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
             block_images=payload.block_images,
             block_images_and_css=payload.block_images_and_css,
             wait_for_complete_page_load=payload.wait_for_complete_page_load,
-            user_agent=payload.user_agent,
+            user_agent=user_agent,
             window_size=payload.window_size,
             lang=payload.lang,
             remove_default_browser_check_argument=True,
         )
+
+        if payload.block_trackers and hasattr(driver, "_tab"):
+            try:
+                driver._tab.block_urls(_TRACKER_URL_PATTERNS)
+            except Exception:
+                pass
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
@@ -376,15 +536,17 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
                 _wait_for_readiness(
                     driver,
                     selector=payload.wait_for_selector,
-                    timeout_seconds=min(payload.wait_timeout_seconds, remaining_budget),
+                    timeout_seconds=min(
+                        payload.wait_timeout_seconds, remaining_budget
+                    ),
                 )
 
                 html = driver.page_html or ""
                 status_code, headers, final_url, metadata_error = _fetch_metadata(
                     driver, target_url
                 )
-                blocked_detected, challenge_detected = _detect_block_challenge(
-                    html, status_code
+                blocked_detected, challenge_detected, detected_marker = (
+                    _detect_block_challenge(html, status_code)
                 )
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)
 
@@ -425,6 +587,8 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
                     "blocked_detected": blocked_detected,
                     "challenge_detected": challenge_detected,
                     "error_category": metadata_error_category,
+                    "execution_tier": "browser_driver",
+                    "detected_challenge": detected_marker,
                 }
 
                 if blocked_detected:
@@ -453,6 +617,7 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
                         strategy_used=strategy,
                         render_ms=render_ms,
                         error_category="navigation_error",
+                        execution_tier="browser_driver",
                     )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -464,6 +629,7 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
             strategy_used=strategies[-1] if strategies else None,
             render_ms=render_ms,
             error_category="navigation_error",
+            execution_tier="browser_driver",
         )
     finally:
         try:
@@ -471,7 +637,55 @@ def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
                 driver.close()
         finally:
             shutil.rmtree(runtime_dir, ignore_errors=True)
-            _unregister_request_id(request_id)
+
+
+def _run_scrape(payload: ScrapeRequest) -> dict[str, Any]:
+    target_url = str(payload.url)
+    request_id = str(uuid.uuid4())
+    started_monotonic = time.monotonic()
+
+    _register_request_id(request_id)
+    try:
+        should_try_request_tier = (
+            payload.execution_mode == "request"
+            or (
+                payload.execution_mode == "auto"
+                and payload.navigation_mode == "auto"
+                and not payload.wait_for_selector
+            )
+        )
+
+        if should_try_request_tier:
+            try:
+                request_result = _run_request_scrape(
+                    payload, request_id, started_monotonic
+                )
+                if request_result is not None:
+                    return request_result
+            except Exception as exc:
+                logger.info(
+                    "request_tier_failed request_id=%s host=%s error=%s",
+                    request_id,
+                    urlparse(target_url).hostname,
+                    str(exc),
+                )
+                if payload.execution_mode == "request":
+                    render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                    return _error_payload(
+                        target_url,
+                        str(exc),
+                        request_id=request_id,
+                        attempts=1,
+                        strategy_used="anti_detect_request",
+                        render_ms=render_ms,
+                        error_category="navigation_error",
+                        execution_tier="http_request",
+                    )
+
+        # Execute browser tier (for mode="browser", explicit navigation_mode, or when mode="auto" escalates)
+        return _run_browser_scrape(payload, request_id, started_monotonic)
+    finally:
+        _unregister_request_id(request_id)
 
 
 def _validation_error_payload(url: str, message: str) -> dict[str, Any]:
@@ -503,7 +717,9 @@ def health() -> dict[str, str]:
 @app.post("/scrape", response_model=ScrapeResponse)
 async def scrape(payload: ScrapeRequest) -> JSONResponse:
     target_url = str(payload.url)
-    is_allowed, validation_status, validation_error = _validate_target_url(target_url)
+    is_allowed, validation_status, validation_error = _validate_target_url(
+        target_url
+    )
     if not is_allowed:
         return JSONResponse(
             status_code=validation_status,
@@ -541,10 +757,11 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
 
     status_code = 200 if not result.get("error") else 502
     logger.info(
-        "scrape_complete request_id=%s host=%s mode=%s attempts=%s status=%d error_category=%s",
+        "scrape_complete request_id=%s host=%s mode=%s tier=%s attempts=%s status=%d error_category=%s",
         result.get("request_id"),
         urlparse(target_url).hostname,
         payload.navigation_mode,
+        result.get("execution_tier"),
         result.get("attempts"),
         status_code,
         result.get("error_category"),

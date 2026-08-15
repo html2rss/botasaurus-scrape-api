@@ -57,13 +57,17 @@ class _CaptureDriver(_FakeDriver):
 class MainUnitTests(unittest.TestCase):
     def test_request_defaults(self):
         payload = main.ScrapeRequest(url="https://example.com")
+        self.assertEqual(payload.execution_mode, "auto")
         self.assertEqual(payload.navigation_mode, "auto")
         self.assertEqual(payload.max_retries, 2)
         self.assertEqual(payload.wait_timeout_seconds, 15)
         self.assertTrue(payload.block_images)
         self.assertFalse(payload.block_images_and_css)
+        self.assertTrue(payload.block_trackers)
         self.assertTrue(payload.wait_for_complete_page_load)
         self.assertIsNone(payload.user_agent)
+        self.assertIsNone(payload.headers)
+        self.assertIsNone(payload.cookies)
         self.assertIsNone(payload.window_size)
         self.assertIsNone(payload.lang)
         self.assertFalse(payload.headless)
@@ -82,16 +86,18 @@ class MainUnitTests(unittest.TestCase):
         self.assertEqual(main._strategies_for_request("get", 2), ["get", "get", "get"])
 
     def test_challenge_detection_marker(self):
-        blocked, challenge = main._detect_block_challenge(
+        blocked, challenge, marker = main._detect_block_challenge(
             '<span id="challenge-error-text">Enable JavaScript and cookies to continue</span>',
             200,
         )
         self.assertTrue(blocked)
         self.assertTrue(challenge)
+        self.assertEqual(marker, "challenge-error-text")
 
     def test_cleanup_runs_on_navigation_error(self):
         payload = main.ScrapeRequest(
             url="https://example.com",
+            execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
             wait_for_selector="#missing",
@@ -110,6 +116,7 @@ class MainUnitTests(unittest.TestCase):
         _CaptureDriver.last_init_kwargs = None
         payload = main.ScrapeRequest(
             url="https://example.com",
+            execution_mode="browser",
             block_images=True,
             block_images_and_css=True,
             wait_for_complete_page_load=False,
