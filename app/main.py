@@ -7,8 +7,9 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, Optional
+from typing import Any, AsyncGenerator, Optional
 from urllib.parse import urlparse
 
 from fastapi import FastAPI
@@ -38,14 +39,25 @@ _executor = ThreadPoolExecutor(max_workers=max(1, _MAX_WORKERS))
 _engine = ScraperEngine()
 _RUNTIME_ROOT = _engine.runtime_root
 
-app = FastAPI(title="Botasaurus Scrape API", version="1.2.0")
-
 logger = logging.getLogger("botasaurus_scrape_api")
 if not logger.handlers:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+    yield
+    _executor.shutdown(wait=False, cancel_futures=True)
+
+
+app = FastAPI(
+    title="Botasaurus Scrape API",
+    version="1.2.0",
+    lifespan=lifespan,
+)
 
 
 # Backward-compatible function shims for legacy callers/tests
@@ -204,8 +216,3 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
         result.get("error_category"),
     )
     return JSONResponse(status_code=status_code, content=result)
-
-
-@app.on_event("shutdown")
-def shutdown() -> None:
-    _executor.shutdown(wait=False, cancel_futures=True)

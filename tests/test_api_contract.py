@@ -276,6 +276,67 @@ class ScraperEngineUnitTests(unittest.TestCase):
         engine.register_request_id("req-123")
         engine.unregister_request_id("req-123")
 
+    def test_scrape_session_context_manager(self):
+        from app.engine import ScrapeSession
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with ScrapeSession(engine, "req-session-1") as session:
+                self.assertIn("req-session-1", engine._active_request_ids)
+                session.prepare_profile_dirs()
+                self.assertTrue(session.profile_dir.is_dir())
+
+            self.assertNotIn("req-session-1", engine._active_request_ids)
+            self.assertFalse(session.runtime_dir.exists())
+
+    def test_effective_user_agent_resolution(self):
+        # Explicit user_agent wins
+        req1 = main.ScrapeRequest(
+            url="https://example.com",
+            user_agent="CustomAgent/1.0",
+            headers={"User-Agent": "HeaderAgent/1.0"},
+        )
+        self.assertEqual(req1.effective_user_agent, "CustomAgent/1.0")
+
+        # Header user-agent fallback
+        req2 = main.ScrapeRequest(
+            url="https://example.com",
+            headers={"User-Agent": "HeaderAgent/1.0"},
+        )
+        self.assertEqual(req2.effective_user_agent, "HeaderAgent/1.0")
+
+        # None if not provided
+        req3 = main.ScrapeRequest(url="https://example.com")
+        self.assertIsNone(req3.effective_user_agent)
+
+    def test_scrape_response_factory_invariants(self):
+        from app.engine import ScrapeResponse
+
+        success = ScrapeResponse.create_success(
+            "https://example.com",
+            request_id="req-abc",
+            html="<html></html>",
+            attempts=1,
+            strategy_used="get",
+            render_ms=120,
+            execution_tier="browser_driver",
+        )
+        self.assertEqual(success["status_code"], 200)
+        self.assertIsNone(success["error"])
+        self.assertEqual(success["execution_tier"], "browser_driver")
+        self.assertEqual(success["final_url"], "https://example.com")
+
+        err = ScrapeResponse.create_error(
+            "https://example.com",
+            "Something broke",
+            request_id="req-err",
+            error_category="navigation_error",
+        )
+        self.assertEqual(err["error"], "Something broke")
+        self.assertEqual(err["error_category"], "navigation_error")
+        self.assertEqual(err["html"], "")
+
 
 if __name__ == "__main__":
     unittest.main()
+

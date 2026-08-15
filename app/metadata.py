@@ -25,24 +25,16 @@ class MetadataExtractor:
         cls, driver: Any, target_url: str
     ) -> tuple[Optional[int], Optional[dict[str, str]], Optional[str]]:
         reqs = getattr(driver, "requests", None)
-        if isinstance(reqs, (list, tuple)) and reqs:
-            for req in reversed(reqs):
-                resp = getattr(req, "response", None)
-                if resp:
-                    status_code = getattr(resp, "status_code", None)
-                    headers = getattr(resp, "headers", None)
-                    req_url = getattr(req, "url", None)
-                    if status_code is not None:
-                        hdr_dict = (
-                            {str(k): str(v) for k, v in dict(headers).items()}
-                            if headers
-                            else None
-                        )
-                        return (
-                            int(status_code),
-                            hdr_dict,
-                            str(req_url) if req_url else None,
-                        )
+        if not isinstance(reqs, (list, tuple)):
+            return None, None, None
+        for req in reversed(reqs):
+            resp = getattr(req, "response", None)
+            status_code = getattr(resp, "status_code", None)
+            if status_code is not None:
+                headers = getattr(resp, "headers", None)
+                hdr_dict = {str(k): str(v) for k, v in dict(headers).items()} if headers else None
+                req_url = getattr(req, "url", None)
+                return int(status_code), hdr_dict, str(req_url) if req_url else None
         return None, None, None
 
     @classmethod
@@ -59,40 +51,28 @@ class MetadataExtractor:
                 return None, None, None
 
             for entry in reversed(logs):
-                raw_msg = (
-                    entry.get("message", "{}")
-                    if isinstance(entry, dict)
-                    else "{}"
-                )
-                msg_obj = (
-                    json.loads(raw_msg)
-                    if isinstance(raw_msg, str)
-                    else raw_msg
-                )
-                msg = (
-                    msg_obj.get("message", {})
-                    if isinstance(msg_obj, dict)
-                    else {}
-                )
-                if msg.get("method") == "Network.responseReceived":
-                    params = msg.get("params", {})
-                    resp = params.get("response", {})
-                    res_type = params.get("type") or resp.get("type")
-                    if res_type in ("Document", "Other", None) or not res_type:
-                        status_code = resp.get("status")
-                        headers = resp.get("headers")
-                        url = resp.get("url")
-                        if status_code is not None:
-                            hdr_dict = (
-                                {str(k): str(v) for k, v in headers.items()}
-                                if isinstance(headers, dict)
-                                else None
-                            )
-                            return (
-                                int(status_code),
-                                hdr_dict,
-                                str(url) if url else None,
-                            )
+                raw_msg = entry.get("message", "{}") if isinstance(entry, dict) else "{}"
+                msg_obj = json.loads(raw_msg) if isinstance(raw_msg, str) else raw_msg
+                msg = msg_obj.get("message", {}) if isinstance(msg_obj, dict) else {}
+                if msg.get("method") != "Network.responseReceived":
+                    continue
+
+                params = msg.get("params", {})
+                resp = params.get("response", {})
+                res_type = params.get("type") or resp.get("type")
+                if res_type and res_type not in ("Document", "Other"):
+                    continue
+
+                status_code = resp.get("status")
+                if status_code is not None:
+                    headers = resp.get("headers")
+                    hdr_dict = (
+                        {str(k): str(v) for k, v in headers.items()}
+                        if isinstance(headers, dict)
+                        else None
+                    )
+                    url = resp.get("url")
+                    return int(status_code), hdr_dict, str(url) if url else None
         except Exception as exc:
             logger.debug("cdp_metadata_extraction_failed error=%s", str(exc))
 
@@ -103,33 +83,18 @@ class MetadataExtractor:
         final_url = getattr(driver, "current_url", None) or target_url
 
         try:
-            # 1. Try driver.requests
-            status_code, headers, passive_url = cls.extract_from_requests(
-                driver, target_url
-            )
-            if status_code is not None:
-                return MetadataResult(
-                    status_code=status_code,
-                    headers=headers,
-                    final_url=passive_url or str(final_url),
-                    metadata_error=None,
-                )
-
-            # 2. Try CDP performance logs
-            status_code, headers, passive_url = cls.extract_from_cdp_logs(
-                driver, target_url
-            )
-            if status_code is not None:
-                return MetadataResult(
-                    status_code=status_code,
-                    headers=headers,
-                    final_url=passive_url or str(final_url),
-                    metadata_error=None,
-                )
+            for extractor in (cls.extract_from_requests, cls.extract_from_cdp_logs):
+                status_code, headers, passive_url = extractor(driver, target_url)
+                if status_code is not None:
+                    return MetadataResult(
+                        status_code=status_code,
+                        headers=headers,
+                        final_url=passive_url or str(final_url),
+                        metadata_error=None,
+                    )
         except Exception as exc:
             logger.warning("metadata_fetch_error error=%s", str(exc))
 
-        # Default fallback
         return MetadataResult(
             status_code=200,
             headers=None,
