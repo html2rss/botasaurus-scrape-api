@@ -252,6 +252,7 @@ class ScrapeSession:
                 try:
                     self.driver.close()
                 except Exception:
+                    # Best-effort driver shutdown during cleanup
                     pass
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
@@ -313,6 +314,7 @@ class ScraperEngine:
             try:
                 driver._tab.block_urls(_TRACKER_URL_PATTERNS)
             except Exception:
+                # Optional CDP URL blocker feature
                 pass
 
         if payload.cookies:
@@ -322,12 +324,14 @@ class ScraperEngine:
                         [{"name": str(c_name), "value": str(c_val), "url": target_url}]
                     )
                 except Exception:
+                    # Best-effort cookie initialization
                     pass
 
         if payload.headers and hasattr(driver, "_tab"):
             try:
                 driver._tab.set_extra_http_headers(payload.headers)
             except Exception:
+                # Optional CDP extra HTTP headers feature
                 pass
 
     @classmethod
@@ -348,6 +352,7 @@ class ScraperEngine:
                 sleep_random_fn(0.5, 1.2)
                 return
             except Exception:
+                # Fall back to standard sleep if driver sleep_random fails
                 pass
         driver.sleep(1)
 
@@ -361,21 +366,25 @@ class ScraperEngine:
             try:
                 scroll_bottom_fn()
             except Exception:
+                # Fall back to alternative scrolling if scroll_to_bottom fails
                 pass
         elif callable(scroll_fn):
             try:
                 scroll_fn()
             except Exception:
+                # Fall back to JS scroll if scroll fails
                 pass
         elif callable(run_js_fn):
             try:
                 run_js_fn("window.scrollTo(0, document.body.scrollHeight);")
             except Exception:
+                # Fall back to execute_script if run_js fails
                 pass
         elif hasattr(driver, "execute_script"):
             try:
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
             except Exception:
+                # Best-effort JS scroll execution
                 pass
 
         sleep_random_fn = getattr(driver, "sleep_random", None)
@@ -384,11 +393,13 @@ class ScraperEngine:
                 sleep_random_fn(0.4, 0.9)
                 return
             except Exception:
+                # Fall back to standard sleep if sleep_random fails
                 pass
 
         try:
             driver.sleep(0.5)
         except Exception:
+            # Best-effort post-scroll timing wait
             pass
 
     def run_request_tier(
@@ -481,6 +492,7 @@ class ScraperEngine:
             try:
                 req.close()
             except Exception:
+                # Best-effort HTTP client cleanup
                 pass
 
     def run_browser_tier(

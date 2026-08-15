@@ -60,6 +60,7 @@ class ChallengeDetector:
                             matched_marker = marker_label
                             break
                     except Exception:
+                        # Best-effort driver bot detection check
                         pass
 
         # 2. HTML text markers
