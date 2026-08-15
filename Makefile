@@ -1,8 +1,11 @@
-.PHONY: build serve health scrape-example smoke
+.PHONY: test build serve health scrape-example smoke
 
 IMAGE ?= botasaurus-api
 PORT ?= 4010
 BASE_URL ?= http://localhost:$(PORT)
+
+test:
+	python3 -m unittest discover -s tests
 
 build:
 	docker build -t $(IMAGE) .

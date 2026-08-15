@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from botasaurus.browser import Driver
@@ -25,7 +25,7 @@ DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
 _RUNTIME_ROOT = Path("/tmp/scrape")
 
 ExecutionMode = Literal["auto", "request", "browser"]
-NavigationMode = Literal["auto", "get", "google_get", "google_get_bypass"]
+NavigationMode = Literal["auto", "get", "google_get", "google_get_bypass", "organic_get"]
 ErrorCategory = Literal[
     "timeout", "challenge_block", "navigation_error", "metadata_error"
 ]
@@ -52,35 +52,39 @@ class ScrapeRequest(BaseModel):
     execution_mode: ExecutionMode = "auto"
     navigation_mode: NavigationMode = "auto"
     max_retries: int = Field(default=2, ge=0, le=3)
-    wait_for_selector: Optional[str] = None
+    wait_for_selector: str | None = None
     wait_timeout_seconds: int = Field(
         default=DEFAULT_WAIT_TIMEOUT_SECONDS,
         ge=1,
         le=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     )
+    scroll: bool = False
+    scroll_to_bottom: bool = False
     block_images: bool = True
     block_images_and_css: bool = False
     block_trackers: bool = True
     wait_for_complete_page_load: bool = True
-    user_agent: Optional[str] = None
-    headers: Optional[dict[str, str]] = None
-    cookies: Optional[dict[str, str]] = None
-    window_size: Optional[list[int]] = None
-    lang: Optional[str] = None
+    user_agent: str | None = None
+    headers: dict[str, str] | None = None
+    cookies: dict[str, str] | None = None
+    window_size: list[int] | None = None
+    lang: str | None = None
     headless: bool = False
-    proxy: Optional[str] = None
+    proxy: str | None = None
 
     @field_validator("window_size")
     @classmethod
-    def validate_window_size(cls, value: Optional[list[int]]) -> Optional[list[int]]:
-        if value is None:
-            return value
-        if len(value) != 2:
+    def validate_window_size(cls, value: list[int] | None) -> list[int] | None:
+        if value is not None and len(value) != 2:
             raise ValueError("window_size must have exactly 2 integers")
         return value
 
     @property
-    def effective_user_agent(self) -> Optional[str]:
+    def should_scroll(self) -> bool:
+        return self.scroll or self.scroll_to_bottom
+
+    @property
+    def effective_user_agent(self) -> str | None:
         if self.user_agent:
             return self.user_agent
         if self.headers:
@@ -90,21 +94,21 @@ class ScrapeRequest(BaseModel):
 
 class ScrapeResponse(BaseModel):
     url: str
-    final_url: Optional[str] = None
-    status_code: Optional[int] = None
-    headers: Optional[dict[str, str]] = None
+    final_url: str | None = None
+    status_code: int | None = None
+    headers: dict[str, str] | None = None
     html: str = ""
-    error: Optional[str] = None
-    metadata_error: Optional[str] = None
+    error: str | None = None
+    metadata_error: str | None = None
     request_id: str
     attempts: int = 0
-    strategy_used: Optional[str] = None
+    strategy_used: str | None = None
     render_ms: int = 0
     blocked_detected: bool = False
     challenge_detected: bool = False
-    error_category: Optional[ErrorCategory] = None
-    execution_tier: Optional[str] = None
-    detected_challenge: Optional[str] = None
+    error_category: ErrorCategory | None = None
+    execution_tier: str | None = None
+    detected_challenge: str | None = None
 
     @classmethod
     def create_success(
@@ -117,15 +121,15 @@ class ScrapeResponse(BaseModel):
         strategy_used: str,
         render_ms: int,
         execution_tier: str,
-        final_url: Optional[str] = None,
-        status_code: Optional[int] = 200,
-        headers: Optional[dict[str, str]] = None,
-        metadata_error: Optional[str] = None,
+        final_url: str | None = None,
+        status_code: int | None = 200,
+        headers: dict[str, str] | None = None,
+        metadata_error: str | None = None,
         blocked_detected: bool = False,
         challenge_detected: bool = False,
-        error: Optional[str] = None,
-        error_category: Optional[ErrorCategory] = None,
-        detected_challenge: Optional[str] = None,
+        error: str | None = None,
+        error_category: ErrorCategory | None = None,
+        detected_challenge: str | None = None,
     ) -> dict[str, Any]:
         return cls(
             url=url,
@@ -154,18 +158,18 @@ class ScrapeResponse(BaseModel):
         *,
         request_id: str,
         attempts: int = 0,
-        strategy_used: Optional[str] = None,
+        strategy_used: str | None = None,
         render_ms: int = 0,
-        error_category: Optional[ErrorCategory] = None,
-        execution_tier: Optional[str] = None,
-        detected_challenge: Optional[str] = None,
+        error_category: ErrorCategory | None = None,
+        execution_tier: str | None = None,
+        detected_challenge: str | None = None,
         blocked_detected: bool = False,
         challenge_detected: bool = False,
         html: str = "",
-        status_code: Optional[int] = None,
-        headers: Optional[dict[str, str]] = None,
-        final_url: Optional[str] = None,
-        metadata_error: Optional[str] = None,
+        status_code: int | None = None,
+        headers: dict[str, str] | None = None,
+        final_url: str | None = None,
+        metadata_error: str | None = None,
     ) -> dict[str, Any]:
         return cls(
             url=url,
@@ -193,11 +197,11 @@ def make_error_payload(
     *,
     request_id: str,
     attempts: int = 0,
-    strategy_used: Optional[str] = None,
+    strategy_used: str | None = None,
     render_ms: int = 0,
-    error_category: Optional[ErrorCategory] = None,
-    execution_tier: Optional[str] = None,
-    detected_challenge: Optional[str] = None,
+    error_category: ErrorCategory | None = None,
+    execution_tier: str | None = None,
+    detected_challenge: str | None = None,
 ) -> dict[str, Any]:
     return ScrapeResponse.create_error(
         url,
@@ -232,7 +236,7 @@ class ScrapeSession:
         self.request_id = request_id
         self.runtime_dir = engine.runtime_root / request_id
         self.profile_dir = self.runtime_dir / "profile"
-        self.driver: Optional[Driver] = None
+        self.driver: Driver | None = None
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -248,7 +252,6 @@ class ScrapeSession:
                 try:
                     self.driver.close()
                 except Exception:
-                    # Best-effort driver shutdown; ignore errors if already closed
                     pass
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
@@ -287,8 +290,13 @@ class ScraperEngine:
     def navigate(
         cls, driver: Driver, target_url: str, strategy: str, timeout_seconds: int
     ) -> None:
-        method_name = "google_get" if strategy.startswith("google_get") else "get"
-        method = getattr(driver, method_name)
+        if strategy == "organic_get":
+            method = getattr(driver, "organic_get", getattr(driver, "google_get", getattr(driver, "get")))
+        elif strategy.startswith("google_get"):
+            method = getattr(driver, "google_get", getattr(driver, "get"))
+        else:
+            method = getattr(driver, "get")
+
         kwargs: dict[str, Any] = {}
         if strategy == "google_get_bypass":
             kwargs["bypass_cloudflare"] = True
@@ -305,7 +313,6 @@ class ScraperEngine:
             try:
                 driver._tab.block_urls(_TRACKER_URL_PATTERNS)
             except Exception:
-                # Best-effort CDP URL blocking; ignore if tab CDP is not supported
                 pass
 
         if payload.cookies:
@@ -315,14 +322,12 @@ class ScraperEngine:
                         [{"name": str(c_name), "value": str(c_val), "url": target_url}]
                     )
                 except Exception:
-                    # Best-effort cookie insertion; ignore individual malformed cookies
                     pass
 
         if payload.headers and hasattr(driver, "_tab"):
             try:
                 driver._tab.set_extra_http_headers(payload.headers)
             except Exception:
-                # Best-effort header configuration; ignore if tab CDP is not supported
                 pass
 
     @classmethod
@@ -330,7 +335,7 @@ class ScraperEngine:
         cls,
         driver: Driver,
         *,
-        selector: Optional[str],
+        selector: str | None,
         timeout_seconds: int,
     ) -> None:
         if selector:
@@ -338,12 +343,44 @@ class ScraperEngine:
             return
         driver.sleep(1)
 
+    @classmethod
+    def apply_scrolling(cls, driver: Driver) -> None:
+        scroll_bottom_fn = getattr(driver, "scroll_to_bottom", None)
+        scroll_fn = getattr(driver, "scroll", None)
+        run_js_fn = getattr(driver, "run_js", None)
+
+        if callable(scroll_bottom_fn):
+            try:
+                scroll_bottom_fn()
+            except Exception:
+                pass
+        elif callable(scroll_fn):
+            try:
+                scroll_fn()
+            except Exception:
+                pass
+        elif callable(run_js_fn):
+            try:
+                run_js_fn("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+        elif hasattr(driver, "execute_script"):
+            try:
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+
+        try:
+            driver.sleep(0.5)
+        except Exception:
+            pass
+
     def run_request_tier(
         self,
         payload: ScrapeRequest,
         request_id: str,
         started_monotonic: float,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         target_url = str(payload.url)
         remaining_budget = max(
             1,
@@ -390,6 +427,7 @@ class ScraperEngine:
                 and (200 <= status_code < 300)
                 and len(html.strip()) > 0
                 and not payload.wait_for_selector
+                and not payload.should_scroll
             )
 
             if payload.execution_mode == "auto" and not is_clean_success:
@@ -404,7 +442,7 @@ class ScraperEngine:
                 return None
 
             error_msg = "Challenge block detected" if assessment.blocked_detected else None
-            error_cat: Optional[ErrorCategory] = "challenge_block" if assessment.blocked_detected else None
+            error_cat: ErrorCategory | None = "challenge_block" if assessment.blocked_detected else None
 
             return ScrapeResponse.create_success(
                 target_url,
@@ -427,7 +465,6 @@ class ScraperEngine:
             try:
                 req.close()
             except Exception:
-                # Best-effort request client cleanup; ignore teardown errors
                 pass
 
     def run_browser_tier(
@@ -480,9 +517,14 @@ class ScraperEngine:
                     ),
                 )
 
+                if payload.should_scroll:
+                    self.apply_scrolling(session.driver)
+
                 html = session.driver.page_html or ""
                 meta = MetadataExtractor.fetch(session.driver, target_url)
-                assessment = ChallengeDetector.detect(html, meta.status_code)
+                assessment = ChallengeDetector.detect(
+                    html, meta.status_code, driver=session.driver
+                )
 
                 if assessment.challenge_detected or assessment.blocked_detected:
                     logger.warning(
@@ -547,7 +589,7 @@ class ScraperEngine:
                 category: ErrorCategory = (
                     "timeout" if "timeout" in str(exc).lower() else "navigation_error"
                 )
-                return make_error_payload(
+                return ScrapeResponse.create_error(
                     target_url,
                     str(exc),
                     request_id=request_id,
@@ -559,7 +601,7 @@ class ScraperEngine:
                 )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-        return make_error_payload(
+        return ScrapeResponse.create_error(
             target_url,
             "Scrape failed after all strategy attempts",
             request_id=request_id,
@@ -571,14 +613,14 @@ class ScraperEngine:
         )
 
     def execute(
-        self, payload: ScrapeRequest, deadline_monotonic: Optional[float] = None
+        self, payload: ScrapeRequest, deadline_monotonic: float | None = None
     ) -> dict[str, Any]:
         target_url = str(payload.url)
         request_id = str(uuid.uuid4())
         started_monotonic = time.monotonic()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
-            return make_error_payload(
+            return ScrapeResponse.create_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",
                 request_id=request_id,
@@ -595,6 +637,7 @@ class ScraperEngine:
                     payload.execution_mode == "auto"
                     and payload.navigation_mode == "auto"
                     and not payload.wait_for_selector
+                    and not payload.should_scroll
                 )
             )
 
@@ -614,7 +657,7 @@ class ScraperEngine:
                     )
                     if payload.execution_mode == "request":
                         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                        return make_error_payload(
+                        return ScrapeResponse.create_error(
                             target_url,
                             str(exc),
                             request_id=request_id,

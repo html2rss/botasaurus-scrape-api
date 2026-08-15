@@ -276,4 +276,18 @@ header_test_code="$(echo "$header_test_response" | tail -n1)"
 [[ "$header_test_code" == "200" ]] || fail "Expected header test 200, got ${header_test_code}"
 assert_html_contains "$header_test_body" "VerifiedVal" || fail "Custom header not found in upstream response"
 
+echo "[smoke] Checking organic_get navigation mode"
+organic_response="$(http_post "/scrape" '{"url":"https://example.com","navigation_mode":"organic_get","max_retries":0,"headless":true}')"
+organic_body="$(echo "$organic_response" | sed '$d')"
+organic_code="$(echo "$organic_response" | tail -n1)"
+[[ "$organic_code" == "200" ]] || fail "Expected organic_get scrape 200, got ${organic_code}"
+assert_json_key_equals "$organic_body" "strategy_used" "organic_get" || fail "Expected strategy_used=organic_get"
+
+echo "[smoke] Checking scroll_to_bottom parameter"
+scroll_response="$(http_post "/scrape" '{"url":"https://example.com","scroll":true,"headless":true}')"
+scroll_body="$(echo "$scroll_response" | sed '$d')"
+scroll_code="$(echo "$scroll_response" | tail -n1)"
+[[ "$scroll_code" == "200" ]] || fail "Expected scroll scrape 200, got ${scroll_code}"
+assert_json_key_equals "$scroll_body" "execution_tier" "browser_driver" || fail "Expected execution_tier=browser_driver for scroll"
+
 echo "[smoke] PASS"

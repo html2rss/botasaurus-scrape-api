@@ -2,13 +2,12 @@ import ipaddress
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
-from app import main
 from app.detector import ChallengeDetector
-from app.engine import ScraperEngine
+from app.engine import ScrapeRequest, ScrapeResponse, ScraperEngine
 from app.metadata import MetadataExtractor
 from app.security import UrlGuard
 
@@ -30,6 +29,7 @@ class _FakeDriver:
         self.current_url = "https://example.com/"
         self.requests = _FakeRequests()
         self._raise_wait = kwargs.pop("raise_wait", False)
+        self.scrolled = False
 
     def get(self, *_args, **_kwargs):
         return None
@@ -37,8 +37,14 @@ class _FakeDriver:
     def google_get(self, *_args, **_kwargs):
         return None
 
+    def organic_get(self, *_args, **_kwargs):
+        return None
+
     def wait_for_element(self, *_args, **_kwargs):
         raise RuntimeError("missing selector")
+
+    def scroll_to_bottom(self):
+        self.scrolled = True
 
     def sleep(self, *_args, **_kwargs):
         return None
@@ -60,11 +66,14 @@ class _CaptureDriver(_FakeDriver):
 
 class MainUnitTests(unittest.TestCase):
     def test_request_defaults(self):
-        payload = main.ScrapeRequest(url="https://example.com")
+        payload = ScrapeRequest(url="https://example.com")
         self.assertEqual(payload.execution_mode, "auto")
         self.assertEqual(payload.navigation_mode, "auto")
         self.assertEqual(payload.max_retries, 2)
         self.assertEqual(payload.wait_timeout_seconds, 15)
+        self.assertFalse(payload.scroll)
+        self.assertFalse(payload.scroll_to_bottom)
+        self.assertFalse(payload.should_scroll)
         self.assertTrue(payload.block_images)
         self.assertFalse(payload.block_images_and_css)
         self.assertTrue(payload.block_trackers)
@@ -77,29 +86,35 @@ class MainUnitTests(unittest.TestCase):
         self.assertFalse(payload.headless)
         self.assertIsNone(payload.proxy)
 
+    def test_scroll_parameters(self):
+        req_scroll = ScrapeRequest(url="https://example.com", scroll=True)
+        self.assertTrue(req_scroll.scroll)
+        self.assertFalse(req_scroll.scroll_to_bottom)
+        self.assertTrue(req_scroll.should_scroll)
+
+        req_bottom = ScrapeRequest(url="https://example.com", scroll_to_bottom=True)
+        self.assertFalse(req_bottom.scroll)
+        self.assertTrue(req_bottom.scroll_to_bottom)
+        self.assertTrue(req_bottom.should_scroll)
+
     def test_window_size_validation_requires_two_ints(self):
         with self.assertRaises(ValidationError):
-            main.ScrapeRequest(url="https://example.com", window_size=[1920])
+            ScrapeRequest(url="https://example.com", window_size=[1920])
 
     def test_strategy_selection(self):
-        self.assertEqual(main._strategies_for_request("auto", 0), ["google_get"])
+        self.assertEqual(ScraperEngine.resolve_strategies("auto", 0), ["google_get"])
         self.assertEqual(
-            main._strategies_for_request("auto", 2),
+            ScraperEngine.resolve_strategies("auto", 2),
             ["google_get", "google_get_bypass", "get"],
         )
-        self.assertEqual(main._strategies_for_request("get", 2), ["get", "get", "get"])
-
-    def test_challenge_detection_marker(self):
-        blocked, challenge, marker = main._detect_block_challenge(
-            '<span id="challenge-error-text">Enable JavaScript and cookies to continue</span>',
-            200,
+        self.assertEqual(ScraperEngine.resolve_strategies("get", 2), ["get", "get", "get"])
+        self.assertEqual(
+            ScraperEngine.resolve_strategies("organic_get", 2),
+            ["organic_get", "organic_get", "organic_get"],
         )
-        self.assertTrue(blocked)
-        self.assertTrue(challenge)
-        self.assertEqual(marker, "challenge-error-text")
 
     def test_cleanup_runs_on_navigation_error(self):
-        payload = main.ScrapeRequest(
+        payload = ScrapeRequest(
             url="https://example.com",
             execution_mode="browser",
             navigation_mode="get",
@@ -111,15 +126,15 @@ class MainUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch.object(main, "_engine", engine), patch("app.engine.Driver", _FakeDriver):
-                result = main._run_scrape(payload)
+            with patch("app.engine.Driver", _FakeDriver):
+                result = engine.execute(payload)
 
             self.assertEqual(result["error_category"], "navigation_error")
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_run_scrape_forwards_driver_kwargs(self):
         _CaptureDriver.last_init_kwargs = None
-        payload = main.ScrapeRequest(
+        payload = ScrapeRequest(
             url="https://example.com",
             execution_mode="browser",
             block_images=True,
@@ -135,8 +150,8 @@ class MainUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch.object(main, "_engine", engine), patch("app.engine.Driver", _CaptureDriver):
-                result = main._run_scrape(payload)
+            with patch("app.engine.Driver", _CaptureDriver):
+                result = engine.execute(payload)
 
         self.assertIsNone(result["error"])
         self.assertIsNotNone(_CaptureDriver.last_init_kwargs)
@@ -153,6 +168,81 @@ class MainUnitTests(unittest.TestCase):
             _CaptureDriver.last_init_kwargs["proxy"], "http://proxy.example:8080"
         )
 
+    def test_apply_scrolling(self):
+        mock_driver = MagicMock()
+        mock_driver.scroll_to_bottom = MagicMock()
+        ScraperEngine.apply_scrolling(mock_driver)
+        mock_driver.scroll_to_bottom.assert_called_once()
+
+
+class UrlGuardUnitTests(unittest.TestCase):
+    def test_validate_rejects_non_http_schemes(self):
+        res = UrlGuard.validate("ftp://example.com/file")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("Only http/https", res.error_message)
+
+    def test_validate_rejects_missing_hostname(self):
+        res = UrlGuard.validate("http://")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 400)
+
+    def test_validate_rejects_localhost(self):
+        res = UrlGuard.validate("http://localhost:8080/test")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 403)
+
+    def test_validate_proxy_rejects_blocked_host(self):
+        res = UrlGuard.validate_proxy("http://127.0.0.1:8080")
+        self.assertFalse(res.is_allowed)
+        self.assertEqual(res.status_code, 403)
+        self.assertIn("Proxy URL is invalid or blocked", res.error_message)
+
+    def test_is_blocked_ip_allows_well_known_nat64_prefix(self):
+        nat64_ip = ipaddress.ip_address("64:ff9b::3691:8e03")
+        self.assertFalse(UrlGuard.is_blocked_ip(nat64_ip))
+
+    def test_is_blocked_ip_still_blocks_loopback(self):
+        loopback = ipaddress.ip_address("127.0.0.1")
+        self.assertTrue(UrlGuard.is_blocked_ip(loopback))
+
+
+class ChallengeDetectorUnitTests(unittest.TestCase):
+    def test_detects_challenge_marker_and_category(self):
+        res = ChallengeDetector.detect("<html>Just a moment...</html>", 200)
+        self.assertTrue(res.challenge_detected)
+        self.assertTrue(res.blocked_detected)
+        self.assertEqual(res.detected_marker, "Just a moment...")
+        self.assertEqual(res.error_category, "challenge_block")
+        self.assertFalse(res.is_clean)
+
+    def test_detects_http_status_block_without_marker(self):
+        res = ChallengeDetector.detect("<html>Forbidden</html>", 403)
+        self.assertFalse(res.challenge_detected)
+        self.assertTrue(res.blocked_detected)
+        self.assertIsNone(res.detected_marker)
+        self.assertEqual(res.error_category, "challenge_block")
+        self.assertFalse(res.is_clean)
+
+    def test_clean_response(self):
+        res = ChallengeDetector.detect("<html><h1>Hello</h1></html>", 200)
+        self.assertTrue(res.is_clean)
+        self.assertFalse(res.blocked_detected)
+        self.assertFalse(res.challenge_detected)
+        self.assertIsNone(res.error_category)
+
+    def test_driver_bot_detection_integration(self):
+        mock_driver = MagicMock()
+        mock_driver.is_bot_detected.return_value = True
+
+        res = ChallengeDetector.detect("<html><body>Clean page</body></html>", 200, driver=mock_driver)
+        self.assertTrue(res.challenge_detected)
+        self.assertTrue(res.blocked_detected)
+        self.assertEqual(res.detected_marker, "botasaurus_driver_bot_detected")
+        self.assertEqual(res.error_category, "challenge_block")
+
+
+class MetadataExtractorUnitTests(unittest.TestCase):
     def test_extract_passive_metadata_from_requests_list(self):
         class _Req:
             def __init__(self, status, headers, url):
@@ -160,7 +250,7 @@ class MainUnitTests(unittest.TestCase):
                 self.url = url
 
         driver = type("D", (), {"requests": [_Req(200, {"content-type": "text/html"}, "https://example.com/final")]})()
-        status, headers, final_url = main._extract_passive_metadata(driver, "https://example.com")
+        status, headers, final_url = MetadataExtractor.extract_from_requests(driver, "https://example.com")
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
         self.assertEqual(final_url, "https://example.com/final")
@@ -192,70 +282,11 @@ class MainUnitTests(unittest.TestCase):
             (),
             {"get_log": lambda self, log_type: perf_log if log_type == "performance" else []},
         )()
-        status, headers, final_url = main._extract_passive_metadata(driver, "https://example.com")
+        status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(driver, "https://example.com")
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
         self.assertEqual(final_url, "https://example.com/cdp-final")
 
-    def test_is_blocked_ip_allows_well_known_nat64_prefix(self):
-        nat64_ip = ipaddress.ip_address("64:ff9b::3691:8e03")
-        self.assertFalse(main._is_blocked_ip(nat64_ip))
-
-    def test_is_blocked_ip_still_blocks_loopback(self):
-        loopback = ipaddress.ip_address("127.0.0.1")
-        self.assertTrue(main._is_blocked_ip(loopback))
-
-
-class UrlGuardUnitTests(unittest.TestCase):
-    def test_validate_rejects_non_http_schemes(self):
-        res = UrlGuard.validate("ftp://example.com/file")
-        self.assertFalse(res.is_allowed)
-        self.assertEqual(res.status_code, 400)
-        self.assertIn("Only http/https", res.error_message)
-
-    def test_validate_rejects_missing_hostname(self):
-        res = UrlGuard.validate("http://")
-        self.assertFalse(res.is_allowed)
-        self.assertEqual(res.status_code, 400)
-
-    def test_validate_rejects_localhost(self):
-        res = UrlGuard.validate("http://localhost:8080/test")
-        self.assertFalse(res.is_allowed)
-        self.assertEqual(res.status_code, 403)
-
-    def test_validate_proxy_rejects_blocked_host(self):
-        res = UrlGuard.validate_proxy("http://127.0.0.1:8080")
-        self.assertFalse(res.is_allowed)
-        self.assertEqual(res.status_code, 403)
-        self.assertIn("Proxy URL is invalid or blocked", res.error_message)
-
-
-class ChallengeDetectorUnitTests(unittest.TestCase):
-    def test_detects_challenge_marker_and_category(self):
-        res = ChallengeDetector.detect("<html>Just a moment...</html>", 200)
-        self.assertTrue(res.challenge_detected)
-        self.assertTrue(res.blocked_detected)
-        self.assertEqual(res.detected_marker, "Just a moment...")
-        self.assertEqual(res.error_category, "challenge_block")
-        self.assertFalse(res.is_clean)
-
-    def test_detects_http_status_block_without_marker(self):
-        res = ChallengeDetector.detect("<html>Forbidden</html>", 403)
-        self.assertFalse(res.challenge_detected)
-        self.assertTrue(res.blocked_detected)
-        self.assertIsNone(res.detected_marker)
-        self.assertEqual(res.error_category, "challenge_block")
-        self.assertFalse(res.is_clean)
-
-    def test_clean_response(self):
-        res = ChallengeDetector.detect("<html><h1>Hello</h1></html>", 200)
-        self.assertTrue(res.is_clean)
-        self.assertFalse(res.blocked_detected)
-        self.assertFalse(res.challenge_detected)
-        self.assertIsNone(res.error_category)
-
-
-class MetadataExtractorUnitTests(unittest.TestCase):
     def test_extract_falls_back_to_200_when_no_driver_metadata(self):
         driver = type("EmptyDriver", (), {"current_url": "https://example.com/dest"})()
         meta = MetadataExtractor.fetch(driver, "https://example.com")
@@ -290,28 +321,23 @@ class ScraperEngineUnitTests(unittest.TestCase):
             self.assertFalse(session.runtime_dir.exists())
 
     def test_effective_user_agent_resolution(self):
-        # Explicit user_agent wins
-        req1 = main.ScrapeRequest(
+        req1 = ScrapeRequest(
             url="https://example.com",
             user_agent="CustomAgent/1.0",
             headers={"User-Agent": "HeaderAgent/1.0"},
         )
         self.assertEqual(req1.effective_user_agent, "CustomAgent/1.0")
 
-        # Header user-agent fallback
-        req2 = main.ScrapeRequest(
+        req2 = ScrapeRequest(
             url="https://example.com",
             headers={"User-Agent": "HeaderAgent/1.0"},
         )
         self.assertEqual(req2.effective_user_agent, "HeaderAgent/1.0")
 
-        # None if not provided
-        req3 = main.ScrapeRequest(url="https://example.com")
+        req3 = ScrapeRequest(url="https://example.com")
         self.assertIsNone(req3.effective_user_agent)
 
     def test_scrape_response_factory_invariants(self):
-        from app.engine import ScrapeResponse
-
         success = ScrapeResponse.create_success(
             "https://example.com",
             request_id="req-abc",
@@ -339,4 +365,3 @@ class ScraperEngineUnitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

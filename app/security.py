@@ -4,7 +4,6 @@ from __future__ import annotations
 import ipaddress
 import socket
 from dataclasses import dataclass
-from typing import Optional
 from urllib.parse import urlparse
 
 _NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
@@ -14,7 +13,7 @@ _NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")
 class ValidationResult:
     is_allowed: bool
     status_code: int = 200
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 class UrlGuard:

@@ -136,9 +136,11 @@ Request options (contract):
   - `get`: only `get`
   - `google_get`: only `google_get`
   - `google_get_bypass`: only `google_get(bypass_cloudflare=true)`
+  - `organic_get`: only `organic_get`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
 - `wait_timeout_seconds`: selector wait timeout (default `15`, capped by service timeout).
+- `scroll` / `scroll_to_bottom`: if true, scrolls the page to trigger lazy-loaded feeds (routes to browser tier).
 - `block_images`: pass image blocking to driver. Default `true`.
 - `block_trackers`: block tracking/ad networks and web fonts to speed up rendering. Default `true`.
 - `headers`: custom HTTP request headers forwarded to request client or browser session.
