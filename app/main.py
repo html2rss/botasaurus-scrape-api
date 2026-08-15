@@ -2,31 +2,27 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
 import logging
 import os
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError, version
-from typing import Any, AsyncGenerator, Optional
+from typing import AsyncGenerator
 from urllib.parse import urlparse
+import uuid
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.detector import ChallengeDetector
 from app.engine import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
-    ErrorCategory,
-    NavigationMode,
     ScrapeRequest,
     ScrapeResponse,
     ScraperEngine,
     make_error_payload,
     make_validation_error_payload,
 )
-from app.metadata import MetadataExtractor
 from app.security import UrlGuard
 
 _MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
@@ -49,85 +45,9 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="Botasaurus Scrape API",
-    version="1.2.0",
+    version="1.3.0",
     lifespan=lifespan,
 )
-
-
-# Backward-compatible function shims for legacy callers/tests
-def _is_blocked_ip(ip: Any) -> bool:
-    return UrlGuard.is_blocked_ip(ip)
-
-
-def _validate_target_url(raw_url: str) -> tuple[bool, int, Optional[str]]:
-    res = UrlGuard.validate(raw_url)
-    return res.is_allowed, res.status_code, res.error_message
-
-
-def _strategies_for_request(mode: NavigationMode, max_retries: int) -> list[str]:
-    return ScraperEngine.resolve_strategies(mode, max_retries)
-
-
-def _detect_block_challenge(
-    html: str, status_code: Optional[int]
-) -> tuple[bool, bool, Optional[str]]:
-    assessment = ChallengeDetector.detect(html, status_code)
-    return (
-        assessment.blocked_detected,
-        assessment.challenge_detected,
-        assessment.detected_marker,
-    )
-
-
-def _extract_passive_metadata(
-    driver: Any, target_url: str
-) -> tuple[Optional[int], Optional[dict[str, str]], Optional[str]]:
-    res = MetadataExtractor.extract_from_requests(driver, target_url)
-    if res[0] is not None:
-        return res
-    return MetadataExtractor.extract_from_cdp_logs(driver, target_url)
-
-
-def _fetch_metadata(
-    driver: Any, target_url: str
-) -> tuple[Optional[int], Optional[dict[str, str]], str, Optional[str]]:
-    res = MetadataExtractor.fetch(driver, target_url)
-    return res.status_code, res.headers, res.final_url, res.metadata_error
-
-
-def _error_payload(
-    url: str,
-    message: str,
-    *,
-    request_id: str,
-    attempts: int = 0,
-    strategy_used: Optional[str] = None,
-    render_ms: int = 0,
-    error_category: Optional[ErrorCategory] = None,
-    execution_tier: Optional[str] = None,
-    detected_challenge: Optional[str] = None,
-) -> dict[str, Any]:
-    return make_error_payload(
-        url,
-        message,
-        request_id=request_id,
-        attempts=attempts,
-        strategy_used=strategy_used,
-        render_ms=render_ms,
-        error_category=error_category,
-        execution_tier=execution_tier,
-        detected_challenge=detected_challenge,
-    )
-
-
-def _validation_error_payload(url: str, message: str) -> dict[str, Any]:
-    return make_validation_error_payload(url, message)
-
-
-def _run_scrape(
-    payload: ScrapeRequest, deadline_monotonic: Optional[float] = None
-) -> dict[str, Any]:
-    return _engine.execute(payload, deadline_monotonic)
 
 
 @app.get("/health")

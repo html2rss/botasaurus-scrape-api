@@ -4,17 +4,17 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
 
 @dataclass(frozen=True, slots=True)
 class MetadataResult:
-    status_code: Optional[int]
-    headers: Optional[dict[str, str]]
+    status_code: int | None
+    headers: dict[str, str] | None
     final_url: str
-    metadata_error: Optional[str] = None
+    metadata_error: str | None = None
 
 
 class MetadataExtractor:
@@ -23,7 +23,7 @@ class MetadataExtractor:
     @classmethod
     def extract_from_requests(
         cls, driver: Any, target_url: str
-    ) -> tuple[Optional[int], Optional[dict[str, str]], Optional[str]]:
+    ) -> tuple[int | None, dict[str, str] | None, str | None]:
         reqs = getattr(driver, "requests", None)
         if not isinstance(reqs, (list, tuple)):
             return None, None, None
@@ -40,7 +40,7 @@ class MetadataExtractor:
     @classmethod
     def extract_from_cdp_logs(
         cls, driver: Any, target_url: str
-    ) -> tuple[Optional[int], Optional[dict[str, str]], Optional[str]]:
+    ) -> tuple[int | None, dict[str, str] | None, str | None]:
         get_log = getattr(driver, "get_log", None)
         if not callable(get_log):
             return None, None, None

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any
 
 _CHALLENGE_MARKERS: tuple[str, ...] = (
     "challenge-error-text",
@@ -14,6 +14,10 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "datadome",
     "DataDome CAPTCHA",
     "/captcha/?",
+    "attention required! | cloudflare",
+    "cloudflare-ray-id",
+    "shield.recaptcha.net",
+    "geo.captcha-delivery.com",
 )
 
 
@@ -21,8 +25,8 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
 class ChallengeAssessment:
     blocked_detected: bool
     challenge_detected: bool
-    detected_marker: Optional[str] = None
-    error_category: Optional[str] = None
+    detected_marker: str | None = None
+    error_category: str | None = None
 
     @property
     def is_clean(self) -> bool:
@@ -30,17 +34,40 @@ class ChallengeAssessment:
 
 
 class ChallengeDetector:
-    """Deep module encapsulating anti-bot challenge heuristics and HTTP status blocks."""
+    """Deep module encapsulating anti-bot challenge heuristics, HTTP status codes, and driver checks."""
 
     @classmethod
-    def detect(cls, html: str, status_code: Optional[int]) -> ChallengeAssessment:
+    def detect(
+        cls,
+        html: str,
+        status_code: int | None = None,
+        driver: Any = None,
+    ) -> ChallengeAssessment:
         lower_html = html.lower()
-        matched_marker: Optional[str] = None
+        matched_marker: str | None = None
 
-        for marker in _CHALLENGE_MARKERS:
-            if marker.lower() in lower_html:
-                matched_marker = marker
-                break
+        # 1. Driver-level anti-bot signal inspection
+        if driver is not None:
+            for method_name, marker_label in (
+                ("is_bot_detected", "botasaurus_driver_bot_detected"),
+                ("is_in_challenge", "botasaurus_driver_challenge"),
+                ("is_blocked", "botasaurus_driver_blocked"),
+            ):
+                check_fn = getattr(driver, method_name, None)
+                if callable(check_fn):
+                    try:
+                        if check_fn():
+                            matched_marker = marker_label
+                            break
+                    except Exception:
+                        pass
+
+        # 2. HTML text markers
+        if matched_marker is None:
+            for marker in _CHALLENGE_MARKERS:
+                if marker.lower() in lower_html:
+                    matched_marker = marker
+                    break
 
         challenge_detected = matched_marker is not None
         blocked_detected = challenge_detected or (
