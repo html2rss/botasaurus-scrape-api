@@ -341,6 +341,14 @@ class ScraperEngine:
         if selector:
             driver.wait_for_element(selector, wait=timeout_seconds)
             return
+
+        sleep_random_fn = getattr(driver, "sleep_random", None)
+        if callable(sleep_random_fn):
+            try:
+                sleep_random_fn(0.5, 1.2)
+                return
+            except Exception:
+                pass
         driver.sleep(1)
 
     @classmethod
@@ -367,6 +375,14 @@ class ScraperEngine:
         elif hasattr(driver, "execute_script"):
             try:
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except Exception:
+                pass
+
+        sleep_random_fn = getattr(driver, "sleep_random", None)
+        if callable(sleep_random_fn):
+            try:
+                sleep_random_fn(0.4, 0.9)
+                return
             except Exception:
                 pass
 
@@ -525,6 +541,19 @@ class ScraperEngine:
                 assessment = ChallengeDetector.detect(
                     html, meta.status_code, driver=session.driver
                 )
+
+                if assessment.challenge_detected or assessment.blocked_detected:
+                    bypass_fn = getattr(session.driver, "bypass_cloudflare", None)
+                    if callable(bypass_fn):
+                        try:
+                            bypass_fn()
+                            html = session.driver.page_html or ""
+                            meta = MetadataExtractor.fetch(session.driver, target_url)
+                            assessment = ChallengeDetector.detect(
+                                html, meta.status_code, driver=session.driver
+                            )
+                        except Exception as exc:
+                            logger.debug("bypass_cloudflare_attempt_failed error=%s", str(exc))
 
                 if assessment.challenge_detected or assessment.blocked_detected:
                     logger.warning(

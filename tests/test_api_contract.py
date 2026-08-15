@@ -362,6 +362,12 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertEqual(err["error_category"], "navigation_error")
         self.assertEqual(err["html"], "")
 
+    def test_wait_for_readiness_uses_sleep_random_when_available(self):
+        mock_driver = MagicMock()
+        mock_driver.sleep_random = MagicMock()
+        ScraperEngine.wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
+        mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
+
 
 if __name__ == "__main__":
     unittest.main()
