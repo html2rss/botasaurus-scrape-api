@@ -248,6 +248,7 @@ class ScrapeSession:
                 try:
                     self.driver.close()
                 except Exception:
+                    # Best-effort driver shutdown; ignore errors if already closed
                     pass
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
@@ -304,6 +305,7 @@ class ScraperEngine:
             try:
                 driver._tab.block_urls(_TRACKER_URL_PATTERNS)
             except Exception:
+                # Best-effort CDP URL blocking; ignore if tab CDP is not supported
                 pass
 
         if payload.cookies:
@@ -313,12 +315,14 @@ class ScraperEngine:
                         [{"name": str(c_name), "value": str(c_val), "url": target_url}]
                     )
                 except Exception:
+                    # Best-effort cookie insertion; ignore individual malformed cookies
                     pass
 
         if payload.headers and hasattr(driver, "_tab"):
             try:
                 driver._tab.set_extra_http_headers(payload.headers)
             except Exception:
+                # Best-effort header configuration; ignore if tab CDP is not supported
                 pass
 
     @classmethod
@@ -423,6 +427,7 @@ class ScraperEngine:
             try:
                 req.close()
             except Exception:
+                # Best-effort request client cleanup; ignore teardown errors
                 pass
 
     def run_browser_tier(

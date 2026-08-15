@@ -15,12 +15,10 @@ from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.detector import ChallengeAssessment, ChallengeDetector
+from app.detector import ChallengeDetector
 from app.engine import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
-    DEFAULT_WAIT_TIMEOUT_SECONDS,
     ErrorCategory,
-    ExecutionMode,
     NavigationMode,
     ScrapeRequest,
     ScrapeResponse,
@@ -28,16 +26,12 @@ from app.engine import (
     make_error_payload,
     make_validation_error_payload,
 )
-from app.metadata import MetadataExtractor, MetadataResult
-from app.security import UrlGuard, ValidationResult
-
-# Re-exports and aliases for backward compatibility with existing tests/consumers
-from botasaurus.browser import Driver  # noqa: F401
+from app.metadata import MetadataExtractor
+from app.security import UrlGuard
 
 _MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
 _executor = ThreadPoolExecutor(max_workers=max(1, _MAX_WORKERS))
 _engine = ScraperEngine()
-_RUNTIME_ROOT = _engine.runtime_root
 
 logger = logging.getLogger("botasaurus_scrape_api")
 if not logger.handlers:
