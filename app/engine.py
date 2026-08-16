@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from app.detector import ChallengeDetector
 from app.metadata import MetadataExtractor
+from app.xhr_collector import XhrCollector
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -109,6 +110,7 @@ class ScrapeResponse(BaseModel):
     error_category: ErrorCategory | None = None
     execution_tier: str | None = None
     detected_challenge: str | None = None
+    xhr_responses: list[dict[str, Any]] = Field(default_factory=list)
 
     @classmethod
     def create_success(
@@ -130,6 +132,7 @@ class ScrapeResponse(BaseModel):
         error: str | None = None,
         error_category: ErrorCategory | None = None,
         detected_challenge: str | None = None,
+        xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return cls(
             url=url,
@@ -148,6 +151,7 @@ class ScrapeResponse(BaseModel):
             error_category=error_category,
             execution_tier=execution_tier,
             detected_challenge=detected_challenge,
+            xhr_responses=xhr_responses or [],
         ).model_dump()
 
     @classmethod
@@ -170,6 +174,7 @@ class ScrapeResponse(BaseModel):
         headers: dict[str, str] | None = None,
         final_url: str | None = None,
         metadata_error: str | None = None,
+        xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         return cls(
             url=url,
@@ -188,6 +193,7 @@ class ScrapeResponse(BaseModel):
             error_category=error_category,
             execution_tier=execution_tier,
             detected_challenge=detected_challenge,
+            xhr_responses=xhr_responses or [],
         ).model_dump()
 
 
@@ -308,14 +314,26 @@ class ScraperEngine:
 
     @classmethod
     def _configure_driver(
-        cls, driver: Driver, payload: ScrapeRequest, target_url: str
+        cls,
+        driver: Driver,
+        payload: ScrapeRequest,
+        target_url: str,
+        collector: XhrCollector | None = None,
     ) -> None:
-        if payload.block_trackers and hasattr(driver, "_tab"):
-            try:
-                driver._tab.block_urls(_TRACKER_URL_PATTERNS)
-            except Exception:
-                # Optional CDP URL blocker feature
-                pass
+        if hasattr(driver, "_tab"):
+            if collector is not None:
+                try:
+                    collector.install(driver._tab)
+                except Exception:
+                    # Best-effort XHR capture; HTML scrape must still proceed
+                    pass
+
+            if payload.block_trackers:
+                try:
+                    driver._tab.block_urls(_TRACKER_URL_PATTERNS)
+                except Exception:
+                    # Optional CDP URL blocker feature
+                    pass
 
         if payload.cookies:
             for c_name, c_val in payload.cookies.items():
@@ -401,6 +419,17 @@ class ScraperEngine:
         except Exception:
             # Best-effort post-scroll timing wait
             pass
+
+    @staticmethod
+    def _harvest_xhr(collector: XhrCollector, driver: Driver) -> list[dict[str, Any]]:
+        tab = getattr(driver, "_tab", None)
+        if tab is None:
+            return collector.results()
+        try:
+            return collector.harvest(tab)
+        except Exception as exc:
+            logger.debug("xhr_harvest_failed error=%s", str(exc))
+            return collector.results()
 
     def run_request_tier(
         self,
@@ -509,6 +538,7 @@ class ScraperEngine:
             payload.navigation_mode, payload.max_retries
         )
         attempts = 0
+        collector = XhrCollector(target_url)
 
         session.driver = Driver(
             headless=payload.headless,
@@ -524,7 +554,9 @@ class ScraperEngine:
             lang=payload.lang,
             remove_default_browser_check_argument=True,
         )
-        self._configure_driver(session.driver, payload, target_url)
+        self._configure_driver(
+            session.driver, payload, target_url, collector=collector
+        )
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
@@ -548,6 +580,8 @@ class ScraperEngine:
                 if payload.should_scroll:
                     self.apply_scrolling(session.driver)
 
+                xhr_responses = self._harvest_xhr(collector, session.driver)
+
                 html = session.driver.page_html or ""
                 meta = MetadataExtractor.fetch(session.driver, target_url)
                 assessment = ChallengeDetector.detect(
@@ -564,6 +598,9 @@ class ScraperEngine:
                             assessment = ChallengeDetector.detect(
                                 html, meta.status_code, driver=session.driver
                             )
+                            xhr_responses = self._harvest_xhr(
+                                collector, session.driver
+                            )
                         except Exception as exc:
                             logger.debug("bypass_cloudflare_attempt_failed error=%s", str(exc))
 
@@ -577,6 +614,9 @@ class ScraperEngine:
                         assessment.detected_marker,
                     )
                     if attempt_index < len(strategies):
+                        # Drop interstitial JSON from the failed attempt so it
+                        # cannot pollute the next strategy's xhr_responses/cap.
+                        collector.reset()
                         continue
 
                     render_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -597,6 +637,7 @@ class ScraperEngine:
                         error_category="challenge_block",
                         execution_tier="browser_driver",
                         detected_challenge=assessment.detected_marker,
+                        xhr_responses=xhr_responses,
                     )
 
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -612,6 +653,7 @@ class ScraperEngine:
                     strategy_used=strategy,
                     render_ms=render_ms,
                     execution_tier="browser_driver",
+                    xhr_responses=xhr_responses,
                 )
             except Exception as exc:
                 logger.warning(
@@ -624,6 +666,7 @@ class ScraperEngine:
                     str(exc),
                 )
                 if attempt_index < len(strategies):
+                    collector.reset()
                     continue
 
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)
