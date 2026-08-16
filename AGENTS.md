@@ -9,7 +9,7 @@
 
 - Endpoints: `GET /health`, `POST /scrape`.
 - Stable legacy `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `error`, `metadata_error`.
-- Additive diagnostics fields (current contract): `request_id`, `attempts`, `strategy_used`, `render_ms`, `blocked_detected`, `challenge_detected`, `error_category`, `execution_tier`, `detected_challenge`.
+- Additive diagnostics fields (current contract): `request_id`, `attempts`, `strategy_used`, `render_ms`, `blocked_detected`, `challenge_detected`, `error_category`, `execution_tier`, `detected_challenge`, `xhr_responses`.
 - Request options (current contract): `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `scroll_to_bottom`, `block_images`, `block_trackers`, `headers`, `cookies`.
 - Error codes:
   - `400` validation/resolution failure

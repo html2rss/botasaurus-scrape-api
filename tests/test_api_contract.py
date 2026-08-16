@@ -351,6 +351,29 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertIsNone(success["error"])
         self.assertEqual(success["execution_tier"], "browser_driver")
         self.assertEqual(success["final_url"], "https://example.com")
+        self.assertEqual(success["xhr_responses"], [])
+
+        with_xhr = ScrapeResponse.create_success(
+            "https://example.com",
+            request_id="req-xhr",
+            html="<html></html>",
+            attempts=1,
+            strategy_used="get",
+            render_ms=10,
+            execution_tier="browser_driver",
+            xhr_responses=[
+                {
+                    "url": "https://api.example.com/items",
+                    "status_code": 200,
+                    "headers": {"content-type": "application/json"},
+                    "body": '{"items":[]}',
+                }
+            ],
+        )
+        self.assertEqual(len(with_xhr["xhr_responses"]), 1)
+        self.assertEqual(
+            with_xhr["xhr_responses"][0]["url"], "https://api.example.com/items"
+        )
 
         err = ScrapeResponse.create_error(
             "https://example.com",
@@ -361,12 +384,154 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertEqual(err["error"], "Something broke")
         self.assertEqual(err["error_category"], "navigation_error")
         self.assertEqual(err["html"], "")
+        self.assertEqual(err["xhr_responses"], [])
 
     def test_wait_for_readiness_uses_sleep_random_when_available(self):
         mock_driver = MagicMock()
         mock_driver.sleep_random = MagicMock()
         ScraperEngine.wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
         mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
+
+
+class _FakeRequestId(str):
+    def to_json(self):
+        return str(self)
+
+
+class _FakeNetworkResponse:
+    def __init__(self, url, status, mime_type, headers=None):
+        self.url = url
+        self.status = status
+        self.mime_type = mime_type
+        self.headers = headers or {}
+
+
+class _FakeTab:
+    """Minimal CDP tab stub for XhrCollector unit tests."""
+
+    def __init__(self, bodies=None):
+        self.bodies = bodies or {}
+        self.network_enabled = False
+        self.response_handler = None
+        self.finished_handler = None
+
+    def send(self, cdp_obj):
+        cmd = next(cdp_obj)
+        method = cmd.get("method")
+        if method == "Network.enable":
+            self.network_enabled = True
+            try:
+                cdp_obj.send({})
+            except StopIteration as exc:
+                return exc.value
+            return None
+        if method == "Network.getResponseBody":
+            rid = str(cmd["params"]["requestId"])
+            body, b64 = self.bodies.get(rid, ("", False))
+            try:
+                cdp_obj.send({"body": body, "base64Encoded": b64})
+            except StopIteration as exc:
+                return exc.value
+            return None
+        raise AssertionError(f"unexpected CDP method: {method}")
+
+    def after_response_received(self, handler):
+        self.response_handler = handler
+
+    def add_handler(self, _event_type, handler):
+        self.finished_handler = handler
+
+
+class XhrCollectorTests(unittest.TestCase):
+    def setUp(self):
+        from app.xhr_collector import XhrCollector
+
+        self.XhrCollector = XhrCollector
+        self.target = "https://example.com/"
+        self.collector = XhrCollector(self.target)
+
+    def _drive_json(self, tab, request_id, url, body, mime="application/json"):
+        rid = _FakeRequestId(request_id)
+        tab.bodies[str(rid)] = (body, False)
+        self.collector._on_response(
+            rid,
+            _FakeNetworkResponse(url, 200, mime, {"content-type": mime}),
+            None,
+        )
+        self.collector._on_finished(type("E", (), {"request_id": rid})())
+
+    def test_install_enables_network_and_registers_handlers(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        self.assertTrue(tab.network_enabled)
+        self.assertEqual(
+            tab.response_handler.__func__, self.collector._on_response.__func__
+        )
+        self.assertIs(tab.response_handler.__self__, self.collector)
+        self.assertEqual(
+            tab.finished_handler.__func__, self.collector._on_finished.__func__
+        )
+        self.assertIs(tab.finished_handler.__self__, self.collector)
+
+    def test_captures_json_subresource(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        self._drive_json(
+            tab, "1", "https://api.example.com/feed", '{"items":[{"title":"A"}]}'
+        )
+        results = self.collector.harvest(tab)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["url"], "https://api.example.com/feed")
+        self.assertEqual(results[0]["status_code"], 200)
+        self.assertIn("items", results[0]["body"])
+
+    def test_skips_non_json_mime(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        self._drive_json(
+            tab,
+            "1",
+            "https://cdn.example.com/app.js",
+            "console.log(1)",
+            mime="application/javascript",
+        )
+        self.assertEqual(self.collector.harvest(tab), [])
+
+    def test_skips_main_document(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        rid = _FakeRequestId("doc")
+        tab.bodies[str(rid)] = ('{"nope":true}', False)
+        self.collector._on_response(
+            rid,
+            _FakeNetworkResponse(self.target, 200, "application/json"),
+            None,
+        )
+        self.collector._on_finished(type("E", (), {"request_id": rid})())
+        self.assertEqual(self.collector.harvest(tab), [])
+
+    def test_skips_empty_body(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        self._drive_json(tab, "1", "https://api.example.com/empty", "")
+        self.assertEqual(self.collector.harvest(tab), [])
+
+    def test_enforces_max_responses_cap(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        for i in range(self.XhrCollector.MAX_RESPONSES + 5):
+            self._drive_json(
+                tab, str(i), f"https://api.example.com/i/{i}", f'{{"i":{i}}}'
+            )
+        results = self.collector.harvest(tab)
+        self.assertEqual(len(results), self.XhrCollector.MAX_RESPONSES)
+
+    def test_enforces_max_body_bytes_cap(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        oversized = "x" * (self.XhrCollector.MAX_BODY_BYTES + 1)
+        self._drive_json(tab, "1", "https://api.example.com/big", oversized)
+        self.assertEqual(self.collector.harvest(tab), [])
 
 
 if __name__ == "__main__":
