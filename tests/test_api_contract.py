@@ -483,6 +483,7 @@ class XhrCollectorTests(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["url"], "https://api.example.com/feed")
         self.assertEqual(results[0]["status_code"], 200)
+        self.assertEqual(results[0]["headers"], {"content-type": "application/json"})
         self.assertIn("items", results[0]["body"])
 
     def test_skips_non_json_mime(self):
@@ -532,6 +533,68 @@ class XhrCollectorTests(unittest.TestCase):
         oversized = "x" * (self.XhrCollector.MAX_BODY_BYTES + 1)
         self._drive_json(tab, "1", "https://api.example.com/big", oversized)
         self.assertEqual(self.collector.harvest(tab), [])
+
+    def test_enforces_aggregate_bytes_cap(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        # Five near-max bodies would exceed 2 MB aggregate; stop once budget trips.
+        chunk = "y" * self.XhrCollector.MAX_BODY_BYTES
+        for i in range(5):
+            self._drive_json(tab, str(i), f"https://api.example.com/chunk/{i}", chunk)
+        results = self.collector.harvest(tab)
+        total = sum(len(entry["body"].encode("utf-8")) for entry in results)
+        self.assertLessEqual(total, self.XhrCollector.MAX_AGGREGATE_BYTES)
+        self.assertEqual(len(results), 4)
+        self.assertLess(len(results), 5)
+
+    def test_headers_allowlist_keeps_only_content_type(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        rid = _FakeRequestId("hdr")
+        tab.bodies[str(rid)] = ('{"ok":true}', False)
+        self.collector._on_response(
+            rid,
+            _FakeNetworkResponse(
+                "https://api.example.com/secure",
+                200,
+                "application/json",
+                {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Set-Cookie": "session=secret",
+                    "X-Request-Id": "abc",
+                },
+            ),
+            None,
+        )
+        self.collector._on_finished(type("E", (), {"request_id": rid})())
+        results = self.collector.harvest(tab)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(
+            results[0]["headers"],
+            {"content-type": "application/json; charset=utf-8"},
+        )
+        self.assertNotIn("Set-Cookie", results[0]["headers"])
+        self.assertNotIn("set-cookie", results[0]["headers"])
+
+    def test_reset_clears_pending_ready_and_collected(self):
+        tab = _FakeTab()
+        self.collector.install(tab)
+        self._drive_json(
+            tab, "1", "https://api.example.com/old", '{"from":"failed-attempt"}'
+        )
+        first = self.collector.harvest(tab)
+        self.assertEqual(len(first), 1)
+
+        self.collector.reset()
+        self.assertEqual(self.collector.results(), [])
+
+        self._drive_json(
+            tab, "2", "https://api.example.com/new", '{"from":"success-attempt"}'
+        )
+        second = self.collector.harvest(tab)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(second[0]["body"], '{"from":"success-attempt"}')
+        self.assertNotIn("failed-attempt", second[0]["body"])
 
 
 if __name__ == "__main__":

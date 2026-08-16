@@ -24,6 +24,9 @@ class XhrCollector:
 
     MAX_RESPONSES = 20
     MAX_BODY_BYTES = 500_000
+    # Mirror html2rss BotasaurusContract::ParsedResponse::MAX_XHR_AGGREGATE_BYTES.
+    MAX_AGGREGATE_BYTES = 2_000_000
+    _HEADER_ALLOWLIST = frozenset({"content-type"})
 
     def __init__(self, target_url: str) -> None:
         self._target_url = str(target_url).rstrip("/")
@@ -38,6 +41,23 @@ class XhrCollector:
         tab.after_response_received(self._on_response)
         tab.add_handler(cdp.network.LoadingFinished, self._on_finished)
 
+    def reset(self) -> None:
+        """Clear pending/ready/collected state between strategy attempts."""
+        with self._lock:
+            self._pending.clear()
+            self._ready_ids.clear()
+            self._collected.clear()
+
+    @classmethod
+    def _allowlisted_headers(cls, headers: Any) -> dict[str, str]:
+        """Keep only content-type; drop Set-Cookie and other headers."""
+        allowed: dict[str, str] = {}
+        for key, value in dict(headers or {}).items():
+            normalized = str(key).lower()
+            if normalized in cls._HEADER_ALLOWLIST:
+                allowed[normalized] = str(value)
+        return allowed
+
     def _on_response(self, request_id: Any, response: Any, _event: Any) -> None:
         url = str(response.url)
         if url.rstrip("/") == self._target_url:
@@ -50,9 +70,7 @@ class XhrCollector:
             self._pending[str(request_id)] = {
                 "url": url,
                 "status_code": int(response.status),
-                "headers": {
-                    str(k): str(v) for k, v in dict(response.headers or {}).items()
-                },
+                "headers": self._allowlisted_headers(response.headers),
                 "request_id": request_id,
             }
 
@@ -73,12 +91,16 @@ class XhrCollector:
                 for rid in ready
                 if rid in self._pending
             ]
+            aggregate_bytes = sum(
+                len(entry["body"].encode("utf-8")) for entry in self._collected
+            )
 
         for rid, meta in jobs:
             request_id = meta.pop("request_id")
             body = self._fetch_body(tab, request_id, rid)
             if body is None:
                 continue
+            body_bytes = len(body.encode("utf-8"))
             entry = {
                 "url": meta["url"],
                 "status_code": meta["status_code"],
@@ -88,7 +110,10 @@ class XhrCollector:
             with self._lock:
                 if len(self._collected) >= self.MAX_RESPONSES:
                     break
+                if aggregate_bytes + body_bytes > self.MAX_AGGREGATE_BYTES:
+                    break
                 self._collected.append(entry)
+                aggregate_bytes += body_bytes
 
         return self.results()
 

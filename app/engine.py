@@ -614,6 +614,9 @@ class ScraperEngine:
                         assessment.detected_marker,
                     )
                     if attempt_index < len(strategies):
+                        # Drop interstitial JSON from the failed attempt so it
+                        # cannot pollute the next strategy's xhr_responses/cap.
+                        collector.reset()
                         continue
 
                     render_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -663,6 +666,7 @@ class ScraperEngine:
                     str(exc),
                 )
                 if attempt_index < len(strategies):
+                    collector.reset()
                     continue
 
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)

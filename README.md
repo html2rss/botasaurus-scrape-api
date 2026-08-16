@@ -195,7 +195,7 @@ Field behavior:
 - `blocked_detected` / `challenge_detected`: anti-bot signal flags from HTML/status markers.
 - `execution_tier`: `http_request` or `browser_driver`.
 - `detected_challenge`: specific challenge marker matched, if any.
-- `xhr_responses`: always-on additive list of JSON XHR/fetch sub-resource bodies captured during the browser tier (empty for HTTP-request tier). Each entry is `{url, status_code, headers, body}`. Caps: at most 20 responses, 500 KB per body. Main document responses are excluded. Candidate filtering for article-likeness is a client concern.
+- `xhr_responses`: always-on additive list of JSON XHR/fetch sub-resource bodies captured during the browser tier (empty for HTTP-request tier). Each entry is `{url, status_code, headers, body}`. `headers` keep only `content-type` (Set-Cookie and other headers are dropped). Caps: at most 20 responses, 500 KB per body, 2 MB aggregate across bodies. Main document responses are excluded. Collector state is reset between strategy retries so challenge interstitials do not pollute a later successful attempt. Candidate filtering for article-likeness is a client concern.
 - `error_category`:
   - `timeout`
   - `challenge_block`
