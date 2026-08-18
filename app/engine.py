@@ -115,6 +115,36 @@ class ScrapeRequest(BaseModel):
         return None
 
 
+HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
+
+
+def utf8_normalize_html(html: str) -> str:
+    if not html:
+        return html
+    if not isinstance(html, str):
+        html = str(html)
+    try:
+        html = html.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return html.encode("utf-8", errors="replace").decode("utf-8")
+
+
+def html_document_headers(
+    html: str, headers: dict[str, str] | None
+) -> tuple[str, dict[str, str] | None]:
+    if not html:
+        return html, headers
+    normalized = utf8_normalize_html(html)
+    out: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        if str(key).lower() == "content-type":
+            continue
+        out[str(key)] = str(value)
+    out["content-type"] = HTML_DOCUMENT_CONTENT_TYPE
+    return normalized, out
+
+
 class ScrapeResponse(BaseModel):
     url: str
     final_url: str | None = None
@@ -156,6 +186,7 @@ class ScrapeResponse(BaseModel):
         detected_challenge: str | None = None,
         xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        html, headers = html_document_headers(html, headers)
         return cls(
             url=url,
             final_url=final_url or url,
@@ -198,6 +229,7 @@ class ScrapeResponse(BaseModel):
         metadata_error: str | None = None,
         xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        html, headers = html_document_headers(html, headers)
         return cls(
             url=url,
             final_url=final_url,

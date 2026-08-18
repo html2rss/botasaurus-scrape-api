@@ -181,8 +181,8 @@ Success response shape (legacy fields preserved, additive diagnostics included):
 
 Field behavior:
 
-- `html`: rendered page HTML.
-- `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`.
+- `html`: rendered page HTML, UTF-8-normalized.
+- `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`. When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8`.
 - `error`: populated when scrape fails or challenge is detected on final attempt.
 - `metadata_error`: populated when metadata extraction fails but HTML scrape succeeds.
 - `request_id`: unique per request for tracing.

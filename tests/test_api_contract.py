@@ -69,6 +69,35 @@ class _CaptureDriver(_FakeDriver):
         super().__init__(*args, **kwargs)
 
 
+class _FakeHttpResponse:
+    def __init__(self, *, text, status_code, headers, url):
+        self.text = text
+        self.status_code = status_code
+        self.headers = headers
+        self.url = url
+
+
+class _FakeRequest:
+    response = None
+
+    def get(self, *_args, **_kwargs):
+        return type(self).response
+
+    def close(self):
+        return None
+
+
+class _ArticleDriver(_FakeDriver):
+    ARTICLE_HTML = (
+        "<html><body><article><h1>Headline</h1>"
+        "<p>Lead paragraph</p></article></body></html>"
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.page_html = self.ARTICLE_HTML
+
+
 class MainUnitTests(unittest.TestCase):
     def test_request_defaults(self):
         payload = ScrapeRequest(url="https://example.com")
@@ -149,6 +178,60 @@ class MainUnitTests(unittest.TestCase):
 
         self.assertIsNone(result["error"])
         self.assertEqual(result["html"], "<html><body><h1>Example Domain</h1></body></html>")
+
+    def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
+        _FakeRequest.response = _FakeHttpResponse(
+            text="<html><body><h1>CaffÃ¨</h1></body></html>",
+            status_code=200,
+            headers={"content-type": "application/octet-stream"},
+            url="https://example.com/",
+        )
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="request",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(payload)
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["execution_tier"], "http_request")
+        self.assertIsNotNone(result["headers"])
+        self.assertEqual(
+            result["headers"]["content-type"], "text/html; charset=utf-8"
+        )
+        self.assertNotIn("application/octet-stream", result["headers"].values())
+        self.assertIn("Caffè", result["html"])
+        self.assertNotIn("CaffÃ¨", result["html"])
+        result["html"].encode("utf-8")
+
+    def test_request_tier_blocked_status_escalates_to_browser(self):
+        payload = ScrapeRequest(url="https://example.com")
+        for status in (401, 403, 429):
+            with self.subTest(status=status):
+                _FakeRequest.response = _FakeHttpResponse(
+                    text="<html><body>Forbidden</body></html>",
+                    status_code=status,
+                    headers={"content-type": "text/html"},
+                    url="https://example.com/",
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    engine = ScraperEngine(runtime_root=Path(tmp))
+                    with (
+                        patch("app.engine.Request", _FakeRequest),
+                        patch("app.engine.Driver", _ArticleDriver),
+                    ):
+                        result = engine.execute(payload)
+
+                self.assertIsNone(result["error"])
+                self.assertEqual(result["execution_tier"], "browser_driver")
+                self.assertIn("<article>", result["html"])
+                self.assertIn("Headline", result["html"])
+                self.assertEqual(
+                    result["headers"]["content-type"], "text/html; charset=utf-8"
+                )
 
     def test_strategy_selection(self):
         self.assertEqual(ScraperEngine.resolve_strategies("auto", 0), ["google_get"])
@@ -401,6 +484,9 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertEqual(success["execution_tier"], "browser_driver")
         self.assertEqual(success["final_url"], "https://example.com")
         self.assertEqual(success["xhr_responses"], [])
+        self.assertEqual(
+            success["headers"]["content-type"], "text/html; charset=utf-8"
+        )
 
         with_xhr = ScrapeResponse.create_success(
             "https://example.com",
