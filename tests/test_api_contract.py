@@ -7,7 +7,12 @@ from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
 
 from app.detector import ChallengeDetector
-from app.engine import ScrapeRequest, ScrapeResponse, ScraperEngine
+from app.engine import (
+    DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    ScrapeRequest,
+    ScrapeResponse,
+    ScraperEngine,
+)
 from app.metadata import MetadataExtractor
 from app.security import UrlGuard
 
@@ -100,6 +105,50 @@ class MainUnitTests(unittest.TestCase):
     def test_window_size_validation_requires_two_ints(self):
         with self.assertRaises(ValidationError):
             ScrapeRequest(url="https://example.com", window_size=[1920])
+
+    def test_wait_timeout_seconds_clamps_gem_default_to_service_cap(self):
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            payload = ScrapeRequest(
+                url="https://example.com", wait_timeout_seconds=28
+            )
+
+        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+        self.assertEqual(DEFAULT_SCRAPE_TIMEOUT_SECONDS, 20)
+        log_text = "\n".join(captured.output)
+        self.assertIn("host=example.com", log_text)
+        self.assertIn("field=wait_timeout_seconds", log_text)
+        self.assertIn("from=28", log_text)
+        self.assertIn("to=20", log_text)
+
+    def test_wait_timeout_seconds_clamps_below_one(self):
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            payload = ScrapeRequest(
+                url="https://example.com", wait_timeout_seconds=0
+            )
+
+        self.assertEqual(payload.wait_timeout_seconds, 1)
+        log_text = "\n".join(captured.output)
+        self.assertIn("field=wait_timeout_seconds", log_text)
+        self.assertIn("from=0", log_text)
+        self.assertIn("to=1", log_text)
+
+    def test_clamped_wait_timeout_allows_execute(self):
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            wait_timeout_seconds=28,
+        )
+        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Driver", _FakeDriver):
+                result = engine.execute(payload)
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["html"], "<html><body><h1>Example Domain</h1></body></html>")
 
     def test_strategy_selection(self):
         self.assertEqual(ScraperEngine.resolve_strategies("auto", 0), ["google_get"])
@@ -595,6 +644,36 @@ class XhrCollectorTests(unittest.TestCase):
         self.assertEqual(len(second), 1)
         self.assertEqual(second[0]["body"], '{"from":"success-attempt"}')
         self.assertNotIn("failed-attempt", second[0]["body"])
+
+
+class SchemaValidationHttpTests(unittest.TestCase):
+    def test_schema_422_returns_scrape_envelope(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "window_size": [1920],
+                },
+            )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertNotIn("detail", body)
+        self.assertEqual(body["url"], "https://example.com")
+        self.assertTrue(body["error"])
+        self.assertIn("window_size", body["error"])
+        self.assertEqual(body["error_category"], "navigation_error")
+        self.assertTrue(body["request_id"])
+        log_text = "\n".join(captured.output)
+        self.assertIn("request_schema_422", log_text)
+        self.assertIn("host=example.com", log_text)
+        self.assertIn("field=window_size", log_text)
 
 
 if __name__ == "__main__":

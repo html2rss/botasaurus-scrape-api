@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from botasaurus.browser import Driver
 from botasaurus.request import Request
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, ValidationInfo, field_validator
 
 from app.detector import ChallengeDetector
 from app.metadata import MetadataExtractor
@@ -72,6 +72,28 @@ class ScrapeRequest(BaseModel):
     lang: str | None = None
     headless: bool = False
     proxy: str | None = None
+
+    @field_validator("wait_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_wait_timeout_seconds(cls, value: Any, info: ValidationInfo) -> Any:
+        if value is None:
+            return value
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):
+            return value
+
+        clamped = max(1, min(numeric, DEFAULT_SCRAPE_TIMEOUT_SECONDS))
+        if clamped != numeric:
+            url = info.data.get("url")
+            logger.info(
+                "request_field_clamped host=%s field=%s from=%s to=%s",
+                urlparse(str(url)).hostname if url else None,
+                "wait_timeout_seconds",
+                numeric,
+                clamped,
+            )
+        return clamped
 
     @field_validator("window_size")
     @classmethod
