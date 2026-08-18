@@ -46,7 +46,8 @@
 
 ## Done Criteria
 
-- Run `make smoke` before finish.
+- Run `make check` before finish.
+- When API contract, Docker behavior, or error semantics change, also run `make smoke`.
 - `make smoke` must cover build, boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation check, localhost guardrail.
 - If API contract, Docker behavior, or error semantics changed, update README in same change.
 - Keep commits scoped (infra vs API vs docs).

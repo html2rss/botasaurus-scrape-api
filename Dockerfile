@@ -4,6 +4,8 @@ FROM python:3.14-slim-bookworm@sha256:23c59390fc717bf09f9336908199a0ae75d9c4264b
 WORKDIR /build
 
 # Build wheels in an isolated stage (botasaurus dependency is sourced from git).
+# Digest-pinned Debian base; apt versions float with distro security updates.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
@@ -16,6 +18,8 @@ FROM python:3.14-slim-bookworm@sha256:23c59390fc717bf09f9336908199a0ae75d9c4264b
 WORKDIR /app
 
 # Install minimal browser/runtime dependencies for Botasaurus.
+# Digest-pinned Debian base; apt versions float with distro security updates.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -43,6 +47,8 @@ RUN ln -sf /usr/bin/chromium /usr/bin/google-chrome
 # Run as unprivileged user
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app
+# Named USER is enough inside this image; host UID mapping is not required.
+# hadolint ignore=DL3066
 USER appuser
 
 EXPOSE 4010

@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  hadolint:
+    name: Hadolint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Lint Dockerfile
+        run: docker run --rm -i hadolint/hadolint < Dockerfile
+
   unit-tests:
     name: Run unit tests
     runs-on: ubuntu-latest
