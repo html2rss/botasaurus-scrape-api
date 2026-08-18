@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError, version
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncGenerator
-from urllib.parse import urlparse
 import uuid
+from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
+from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -18,9 +19,9 @@ from fastapi.responses import JSONResponse
 
 from app.engine import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    ScraperEngine,
     ScrapeRequest,
     ScrapeResponse,
-    ScraperEngine,
     make_error_payload,
     make_validation_error_payload,
 )
@@ -39,7 +40,7 @@ if not logger.handlers:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     yield
     _executor.shutdown(wait=False, cancel_futures=True)
 
@@ -149,7 +150,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
             ),
             timeout=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
         timeout_result = make_error_payload(
             target_url,

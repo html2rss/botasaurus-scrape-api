@@ -32,7 +32,11 @@ class MetadataExtractor:
             status_code = getattr(resp, "status_code", None)
             if status_code is not None:
                 headers = getattr(resp, "headers", None)
-                hdr_dict = {str(k): str(v) for k, v in dict(headers).items()} if headers else None
+                hdr_dict = (
+                    {str(k): str(v) for k, v in dict(headers).items()}
+                    if headers
+                    else None
+                )
                 req_url = getattr(req, "url", None)
                 return int(status_code), hdr_dict, str(req_url) if req_url else None
         return None, None, None
@@ -51,7 +55,9 @@ class MetadataExtractor:
                 return None, None, None
 
             for entry in reversed(logs):
-                raw_msg = entry.get("message", "{}") if isinstance(entry, dict) else "{}"
+                raw_msg = (
+                    entry.get("message", "{}") if isinstance(entry, dict) else "{}"
+                )
                 msg_obj = json.loads(raw_msg) if isinstance(raw_msg, str) else raw_msg
                 msg = msg_obj.get("message", {}) if isinstance(msg_obj, dict) else {}
                 if msg.get("method") != "Network.responseReceived":

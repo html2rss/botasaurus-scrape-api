@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Phase 0 spike variant: defer get_response_body off the CDP handler thread."""
+
 from __future__ import annotations
 
 import base64
@@ -25,7 +26,9 @@ def on_response(request_id, response, _event) -> None:
     mime = (response.mime_type or "").lower()
     if url.startswith("chrome:") or url.startswith("chrome-"):
         return
-    print(f"[ResponseReceived] id={request_id} status={response.status} mime={mime!r} url={url}")
+    print(
+        f"[ResponseReceived] id={request_id} status={response.status} mime={mime!r} url={url}"
+    )
     if url.rstrip("/") == TARGET.rstrip("/"):
         return
     if "json" not in mime:
