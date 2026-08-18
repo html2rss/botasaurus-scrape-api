@@ -9,14 +9,23 @@ from pydantic import ValidationError
 
 from app.detector import ChallengeDetector
 from app.engine import (
-    DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ScraperEngine,
-    ScrapeRequest,
-    ScrapeResponse,
     html_document_headers,
     utf8_normalize_html,
 )
 from app.metadata import MetadataExtractor
+from app.schemas import (
+    DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    ErrorCategory,
+    ExecutionMode,
+    ExecutionTier,
+    NavigationMode,
+    ScrapeDiagnostics,
+    ScrapeError,
+    ScrapeRequest,
+    ScrapeSuccess,
+    WindowSize,
+)
 from app.security import UrlGuard
 
 
@@ -104,13 +113,11 @@ class _ArticleDriver(_FakeDriver):
 class MainUnitTests(unittest.TestCase):
     def test_request_defaults(self):
         payload = ScrapeRequest(url="https://example.com")
-        self.assertEqual(payload.execution_mode, "auto")
-        self.assertEqual(payload.navigation_mode, "auto")
+        self.assertEqual(payload.execution_mode, ExecutionMode.AUTO)
+        self.assertEqual(payload.navigation_mode, NavigationMode.AUTO)
         self.assertEqual(payload.max_retries, 2)
         self.assertEqual(payload.wait_timeout_seconds, 15)
         self.assertFalse(payload.scroll)
-        self.assertFalse(payload.scroll_to_bottom)
-        self.assertFalse(payload.should_scroll)
         self.assertTrue(payload.block_images)
         self.assertFalse(payload.block_images_and_css)
         self.assertTrue(payload.block_trackers)
@@ -126,17 +133,13 @@ class MainUnitTests(unittest.TestCase):
     def test_scroll_parameters(self):
         req_scroll = ScrapeRequest(url="https://example.com", scroll=True)
         self.assertTrue(req_scroll.scroll)
-        self.assertFalse(req_scroll.scroll_to_bottom)
-        self.assertTrue(req_scroll.should_scroll)
+        self.assertFalse(ScrapeRequest(url="https://example.com").scroll)
 
-        req_bottom = ScrapeRequest(url="https://example.com", scroll_to_bottom=True)
-        self.assertFalse(req_bottom.scroll)
-        self.assertTrue(req_bottom.scroll_to_bottom)
-        self.assertTrue(req_bottom.should_scroll)
-
-    def test_window_size_validation_requires_two_ints(self):
+    def test_window_size_validation_requires_object(self):
         with self.assertRaises(ValidationError):
-            ScrapeRequest(url="https://example.com", window_size=[1920])
+            ScrapeRequest(url="https://example.com", window_size=[1920, 1080])
+        with self.assertRaises(ValidationError):
+            ScrapeRequest(url="https://example.com", window_size={"width": 1920})
 
     def test_wait_timeout_seconds_clamps_gem_default_to_service_cap(self):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
@@ -175,9 +178,10 @@ class MainUnitTests(unittest.TestCase):
             with patch("app.engine.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
-        self.assertIsNone(result["error"])
+        self.assertIsNone(result.error if isinstance(result, ScrapeError) else None)
+        self.assertIsInstance(result, ScrapeSuccess)
         self.assertEqual(
-            result["html"], "<html><body><h1>Example Domain</h1></body></html>"
+            result.html, "<html><body><h1>Example Domain</h1></body></html>"
         )
 
     def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
@@ -197,14 +201,14 @@ class MainUnitTests(unittest.TestCase):
             with patch("app.engine.Request", _FakeRequest):
                 result = engine.execute(payload)
 
-        self.assertIsNone(result["error"])
-        self.assertEqual(result["execution_tier"], "http_request")
-        self.assertIsNotNone(result["headers"])
-        self.assertEqual(result["headers"]["content-type"], "text/html; charset=utf-8")
-        self.assertNotIn("application/octet-stream", result["headers"].values())
-        self.assertIn("Caffè", result["html"])
-        self.assertNotIn("CaffÃ¨", result["html"])
-        result["html"].encode("utf-8")
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertEqual(result.diagnostics.execution_tier, ExecutionTier.HTTP_REQUEST)
+        self.assertIsNotNone(result.headers)
+        self.assertEqual(result.headers["content-type"], "text/html; charset=utf-8")
+        self.assertNotIn("application/octet-stream", result.headers.values())
+        self.assertIn("Caffè", result.html)
+        self.assertNotIn("CaffÃ¨", result.html)
+        result.html.encode("utf-8")
 
     def test_utf8_normalize_leaves_correct_unicode_unchanged(self):
         html = "<html><body><h1>Caffè 日本語</h1></body></html>"
@@ -226,8 +230,8 @@ class MainUnitTests(unittest.TestCase):
             with patch("app.engine.Request", _FakeRequest):
                 result = engine.execute(payload)
 
-        self.assertEqual(result["html"], html)
-        self.assertEqual(result["headers"]["content-type"], "text/html; charset=utf-8")
+        self.assertEqual(result.html, html)
+        self.assertEqual(result.headers["content-type"], "text/html; charset=utf-8")
 
     def test_request_tier_blocked_status_escalates_to_browser(self):
         payload = ScrapeRequest(url="https://example.com")
@@ -247,12 +251,14 @@ class MainUnitTests(unittest.TestCase):
                     ):
                         result = engine.execute(payload)
 
-                self.assertIsNone(result["error"])
-                self.assertEqual(result["execution_tier"], "browser_driver")
-                self.assertIn("<article>", result["html"])
-                self.assertIn("Headline", result["html"])
+                self.assertIsInstance(result, ScrapeSuccess)
                 self.assertEqual(
-                    result["headers"]["content-type"], "text/html; charset=utf-8"
+                    result.diagnostics.execution_tier, ExecutionTier.BROWSER_DRIVER
+                )
+                self.assertIn("<article>", result.html)
+                self.assertIn("Headline", result.html)
+                self.assertEqual(
+                    result.headers["content-type"], "text/html; charset=utf-8"
                 )
 
     def test_strategy_selection(self):
@@ -285,7 +291,7 @@ class MainUnitTests(unittest.TestCase):
             with patch("app.engine.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
-            self.assertEqual(result["error_category"], "navigation_error")
+            self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_run_scrape_forwards_driver_kwargs(self):
@@ -297,7 +303,7 @@ class MainUnitTests(unittest.TestCase):
             block_images_and_css=True,
             wait_for_complete_page_load=False,
             user_agent="MyAgent/1.0",
-            window_size=[1920, 1080],
+            window_size=WindowSize(width=1920, height=1080),
             lang="en-US",
             headless=True,
             proxy="http://proxy.example:8080",
@@ -309,7 +315,7 @@ class MainUnitTests(unittest.TestCase):
             with patch("app.engine.Driver", _CaptureDriver):
                 result = engine.execute(payload)
 
-        self.assertIsNone(result["error"])
+        self.assertIsInstance(result, ScrapeSuccess)
         self.assertIsNotNone(_CaptureDriver.last_init_kwargs)
         self.assertTrue(_CaptureDriver.last_init_kwargs["block_images"])
         self.assertTrue(_CaptureDriver.last_init_kwargs["block_images_and_css"])
@@ -513,31 +519,34 @@ class ScraperEngineUnitTests(unittest.TestCase):
         req3 = ScrapeRequest(url="https://example.com")
         self.assertIsNone(req3.effective_user_agent)
 
-    def test_scrape_response_factory_invariants(self):
-        success = ScrapeResponse.create_success(
-            "https://example.com",
-            request_id="req-abc",
+    def test_scrape_envelope_constructors(self):
+        success = ScrapeSuccess(
+            url="https://example.com",
+            final_url="https://example.com",
+            status_code=200,
+            headers={"content-type": "text/html; charset=utf-8"},
             html="<html></html>",
-            attempts=1,
-            strategy_used="get",
-            render_ms=120,
-            execution_tier="browser_driver",
+            metadata_error=None,
+            xhr_responses=[],
+            diagnostics=ScrapeDiagnostics(
+                request_id="req-abc",
+                attempts=1,
+                strategy_used=NavigationMode.GET,
+                render_ms=120,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            ),
         )
-        self.assertEqual(success["status_code"], 200)
-        self.assertIsNone(success["error"])
-        self.assertEqual(success["execution_tier"], "browser_driver")
-        self.assertEqual(success["final_url"], "https://example.com")
-        self.assertEqual(success["xhr_responses"], [])
-        self.assertEqual(success["headers"]["content-type"], "text/html; charset=utf-8")
+        dumped = success.model_dump(mode="json")
+        self.assertEqual(dumped["status_code"], 200)
+        self.assertNotIn("error", dumped)
+        self.assertEqual(dumped["diagnostics"]["execution_tier"], "browser_driver")
+        self.assertEqual(dumped["final_url"], "https://example.com")
+        self.assertEqual(dumped["xhr_responses"], [])
+        self.assertEqual(dumped["headers"]["content-type"], "text/html; charset=utf-8")
 
-        with_xhr = ScrapeResponse.create_success(
-            "https://example.com",
-            request_id="req-xhr",
+        with_xhr = ScrapeSuccess(
+            url="https://example.com",
             html="<html></html>",
-            attempts=1,
-            strategy_used="get",
-            render_ms=10,
-            execution_tier="browser_driver",
             xhr_responses=[
                 {
                     "url": "https://api.example.com/items",
@@ -546,22 +555,28 @@ class ScraperEngineUnitTests(unittest.TestCase):
                     "body": '{"items":[]}',
                 }
             ],
+            diagnostics=ScrapeDiagnostics(
+                request_id="req-xhr",
+                attempts=1,
+                strategy_used=NavigationMode.GET,
+                render_ms=10,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            ),
         )
-        self.assertEqual(len(with_xhr["xhr_responses"]), 1)
-        self.assertEqual(
-            with_xhr["xhr_responses"][0]["url"], "https://api.example.com/items"
-        )
+        self.assertEqual(len(with_xhr.xhr_responses), 1)
+        self.assertEqual(with_xhr.xhr_responses[0].url, "https://api.example.com/items")
 
-        err = ScrapeResponse.create_error(
-            "https://example.com",
-            "Something broke",
-            request_id="req-err",
-            error_category="navigation_error",
+        err = ScrapeError(
+            url="https://example.com",
+            error="Something broke",
+            error_category=ErrorCategory.NAVIGATION_ERROR,
+            diagnostics=ScrapeDiagnostics(request_id="req-err"),
         )
-        self.assertEqual(err["error"], "Something broke")
-        self.assertEqual(err["error_category"], "navigation_error")
-        self.assertEqual(err["html"], "")
-        self.assertEqual(err["xhr_responses"], [])
+        err_dump = err.model_dump(mode="json")
+        self.assertEqual(err_dump["error"], "Something broke")
+        self.assertEqual(err_dump["error_category"], "navigation_error")
+        self.assertNotIn("html", err_dump)
+        self.assertNotIn("xhr_responses", err_dump)
 
     def test_wait_for_readiness_uses_sleep_random_when_available(self):
         mock_driver = MagicMock()
@@ -796,8 +811,9 @@ class SchemaValidationHttpTests(unittest.TestCase):
         self.assertEqual(body["url"], "https://example.com")
         self.assertTrue(body["error"])
         self.assertIn("window_size", body["error"])
-        self.assertEqual(body["error_category"], "navigation_error")
-        self.assertTrue(body["request_id"])
+        self.assertEqual(body["error_category"], "validation")
+        self.assertNotIn("html", body)
+        self.assertTrue(body["diagnostics"]["request_id"])
         log_text = "\n".join(captured.output)
         self.assertIn("request_schema_422", log_text)
         self.assertIn("host=example.com", log_text)
@@ -813,14 +829,15 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         def fake_execute(payload, _deadline=None):
             captured["wait"] = payload.wait_timeout_seconds
-            return ScrapeResponse.create_success(
-                str(payload.url),
-                request_id="req-wait-clamp",
+            return ScrapeSuccess(
+                url=str(payload.url),
                 html="<html></html>",
-                attempts=1,
-                strategy_used="anti_detect_request",
-                render_ms=1,
-                execution_tier="http_request",
+                diagnostics=ScrapeDiagnostics(
+                    request_id="req-wait-clamp",
+                    attempts=1,
+                    render_ms=1,
+                    execution_tier=ExecutionTier.HTTP_REQUEST,
+                ),
             )
 
         with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
@@ -867,17 +884,51 @@ class OpenApiContractTests(unittest.TestCase):
         self.assertIn("/scrape", paths)
         self.assertIn("post", paths["/scrape"])
 
+    def test_operation_ids_and_tags(self):
+        health = self.schema["paths"]["/health"]["get"]
+        scrape = self.schema["paths"]["/scrape"]["post"]
+        self.assertEqual(health["operationId"], "get-health")
+        self.assertEqual(scrape["operationId"], "scrape-url")
+        self.assertEqual(health["tags"], ["health"])
+        self.assertEqual(scrape["tags"], ["scrape"])
+        tag_names = {tag["name"] for tag in self.schema["tags"]}
+        self.assertEqual(tag_names, {"health", "scrape"})
+        for tag in self.schema["tags"]:
+            self.assertTrue(tag.get("description"))
+
+    def test_info_servers_and_version(self):
+        info = self.schema["info"]
+        self.assertEqual(info["title"], "Botasaurus Scrape API")
+        self.assertEqual(info["version"], "2.0.0")
+        self.assertTrue(info.get("description"))
+        self.assertEqual(info["contact"]["name"], "html2rss")
+        self.assertEqual(
+            info["contact"]["url"],
+            "https://github.com/html2rss/botasaurus-scrape-api/issues",
+        )
+        self.assertNotIn("email", info["contact"])
+        self.assertEqual(info["license"]["name"], "MIT")
+        self.assertTrue(info["license"].get("url"))
+        servers = self.schema["servers"]
+        self.assertEqual(servers[0]["url"], "http://localhost:4010")
+        self.assertEqual(servers[0]["description"], "Local Docker (make serve)")
+
     def test_scrape_documents_contract_status_codes(self):
         responses = self.schema["paths"]["/scrape"]["post"]["responses"]
         for status in ("200", "400", "403", "422", "502", "504"):
             self.assertIn(status, responses)
+            self.assertTrue(responses[status].get("description"))
 
     def test_scrape_error_statuses_use_scrape_envelope_not_fastapi_detail(self):
         responses = self.schema["paths"]["/scrape"]["post"]["responses"]
+        success_refs = _schema_ref_names(responses["200"])
+        self.assertIn("ScrapeSuccess", success_refs)
+        self.assertNotIn("ScrapeResponse", success_refs)
         for status in ("400", "403", "422", "502", "504"):
             with self.subTest(status=status):
                 refs = _schema_ref_names(responses[status])
-                self.assertIn("ScrapeResponse", refs)
+                self.assertIn("ScrapeError", refs)
+                self.assertNotIn("ScrapeResponse", refs)
                 self.assertNotIn("HTTPValidationError", refs)
                 self.assertNotIn("ValidationError", refs)
 
@@ -889,19 +940,18 @@ class OpenApiContractTests(unittest.TestCase):
         description = wait_schema.get("description") or ""
         self.assertIn("clamped", description)
 
-    def test_window_size_openapi_requires_two_ints(self):
+    def test_window_size_openapi_is_object(self):
         props = self.schema["components"]["schemas"]["ScrapeRequest"]["properties"]
         window_schema = props["window_size"]
-        # Optional field may wrap the array schema in anyOf with null.
-        array_schema = window_schema
-        if "anyOf" in window_schema:
-            array_schema = next(
-                part
-                for part in window_schema["anyOf"]
-                if part.get("type") == "array" or "items" in part
-            )
-        self.assertEqual(array_schema.get("minItems"), 2)
-        self.assertEqual(array_schema.get("maxItems"), 2)
+        refs = _schema_ref_names(window_schema)
+        self.assertIn("WindowSize", refs)
+        size_schema = self.schema["components"]["schemas"]["WindowSize"]
+        size_props = size_schema["properties"]
+        self.assertIn("width", size_props)
+        self.assertIn("height", size_props)
+        self.assertNotIn("minItems", window_schema)
+        self.assertNotIn("maxItems", window_schema)
+        self.assertNotIn("scroll_to_bottom", props)
 
     def test_health_schema_includes_status_fields(self):
         health_200 = self.schema["paths"]["/health"]["get"]["responses"]["200"]
@@ -912,15 +962,23 @@ class OpenApiContractTests(unittest.TestCase):
         self.assertIn("status", properties)
         self.assertIn("service", properties)
         self.assertIn("botasaurus_version", properties)
+        status_schema = properties["status"]
+        self.assertTrue(
+            status_schema.get("const") == "ok"
+            or status_schema.get("enum") == ["ok"]
+            or "ok" in (status_schema.get("examples") or [])
+        )
 
     def test_xhr_responses_use_xhr_response_model(self):
-        scrape_schema = self.schema["components"]["schemas"]["ScrapeResponse"]
+        scrape_schema = self.schema["components"]["schemas"]["ScrapeSuccess"]
         refs = _schema_ref_names(scrape_schema["properties"]["xhr_responses"])
         self.assertIn("XhrResponse", refs)
         xhr_schema = self.schema["components"]["schemas"]["XhrResponse"]
         properties = xhr_schema["properties"]
         for field in ("url", "status_code", "headers", "body"):
             self.assertIn(field, properties)
+        self.assertIn("diagnostics", scrape_schema["properties"])
+        self.assertNotIn("ScrapeResponse", self.schema["components"]["schemas"])
 
 
 if __name__ == "__main__":
