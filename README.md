@@ -8,7 +8,7 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
   - `GET /health`
   - `POST /scrape`
 - Intended usage: run and test through Docker only.
-- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `25`).
+- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `20`).
 - On-demand isolation-first runtime: every scrape request runs with an ephemeral browser profile and request-scoped runtime dir, then gets fully cleaned up.
 
 ## Prerequisites
@@ -161,7 +161,7 @@ Success response shape (legacy fields preserved, additive diagnostics included):
   "final_url": "https://example.com/",
   "status_code": 200,
   "headers": {
-    "content-type": "text/html"
+    "content-type": "text/html; charset=utf-8"
   },
   "html": "<!doctype html>...",
   "error": null,

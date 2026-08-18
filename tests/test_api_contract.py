@@ -12,6 +12,8 @@ from app.engine import (
     ScrapeRequest,
     ScrapeResponse,
     ScraperEngine,
+    html_document_headers,
+    utf8_normalize_html,
 )
 from app.metadata import MetadataExtractor
 from app.security import UrlGuard
@@ -206,6 +208,33 @@ class MainUnitTests(unittest.TestCase):
         self.assertIn("Caffè", result["html"])
         self.assertNotIn("CaffÃ¨", result["html"])
         result["html"].encode("utf-8")
+
+    def test_utf8_normalize_leaves_correct_unicode_unchanged(self):
+        html = "<html><body><h1>Caffè 日本語</h1></body></html>"
+        self.assertEqual(utf8_normalize_html(html), html)
+
+        normalized, headers = html_document_headers(
+            html, {"content-type": "text/html"}
+        )
+        self.assertEqual(normalized, html)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+
+        _FakeRequest.response = _FakeHttpResponse(
+            text=html,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+        payload = ScrapeRequest(url="https://example.com", execution_mode="request")
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(payload)
+
+        self.assertEqual(result["html"], html)
+        self.assertEqual(
+            result["headers"]["content-type"], "text/html; charset=utf-8"
+        )
 
     def test_request_tier_blocked_status_escalates_to_browser(self):
         payload = ScrapeRequest(url="https://example.com")
@@ -760,6 +789,41 @@ class SchemaValidationHttpTests(unittest.TestCase):
         self.assertIn("request_schema_422", log_text)
         self.assertIn("host=example.com", log_text)
         self.assertIn("field=window_size", log_text)
+
+    def test_scrape_clamps_wait_timeout_instead_of_422(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main_mod
+        from app.main import app
+
+        captured: dict[str, int] = {}
+
+        def fake_execute(payload, _deadline=None):
+            captured["wait"] = payload.wait_timeout_seconds
+            return ScrapeResponse.create_success(
+                str(payload.url),
+                request_id="req-wait-clamp",
+                html="<html></html>",
+                attempts=1,
+                strategy_used="anti_detect_request",
+                render_ms=1,
+                execution_tier="http_request",
+            )
+
+        with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "wait_timeout_seconds": 28,
+                },
+            )
+
+        self.assertNotEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["wait"], DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+        self.assertEqual(captured["wait"], 20)
 
 
 if __name__ == "__main__":
