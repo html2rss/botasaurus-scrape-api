@@ -305,10 +305,12 @@ Note: if your IP is already flagged, you may still get challenge pages. In that 
 
 ## Make Targets
 
-- `make` / `make check`: lint the Dockerfile with Hadolint (Docker).
-- `make lint`: same as `make check`.
-- `make ready`: same as `make check` (pre-PR lint gate; run `make smoke` when Docker behavior changes).
+- `make` / `make check`: Ruff, Hadolint, unit tests, and `make openapi-verify`.
+- `make lint`: Ruff plus Hadolint.
+- `make ready`: same as `make check` (pre-PR gate; run `make smoke` when Docker behavior changes).
 - `make test`: run host unit tests.
+- `make openapi`: regenerate `openapi.yaml` from `app.openapi()`.
+- `make openapi-verify`: fail if `openapi.yaml` does not match a fresh dump.
 - `make build`: build Docker image.
 - `make serve`: build and run API container on `localhost:4010`.
 - `make health`: call `GET /health` on running service.

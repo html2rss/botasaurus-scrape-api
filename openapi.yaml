@@ -120,9 +120,10 @@ components:
           title: Wait For Selector
         wait_timeout_seconds:
           type: integer
-          maximum: 20.0
-          minimum: 1.0
           title: Wait Timeout Seconds
+          description: Selector wait timeout in seconds. Values outside [1, 20] are
+            clamped into that range so scrape still runs; they are not rejected with
+            422.
           default: 15
         scroll:
           type: boolean
@@ -172,6 +173,8 @@ components:
           - items:
               type: integer
             type: array
+            maxItems: 2
+            minItems: 2
           - type: 'null'
           title: Window Size
         lang:

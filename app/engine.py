@@ -58,8 +58,11 @@ class ScrapeRequest(BaseModel):
     wait_for_selector: str | None = None
     wait_timeout_seconds: int = Field(
         default=DEFAULT_WAIT_TIMEOUT_SECONDS,
-        ge=1,
-        le=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+        description=(
+            "Selector wait timeout in seconds. Values outside "
+            f"[1, {DEFAULT_SCRAPE_TIMEOUT_SECONDS}] are clamped into that "
+            "range so scrape still runs; they are not rejected with 422."
+        ),
     )
     scroll: bool = False
     scroll_to_bottom: bool = False
@@ -70,7 +73,7 @@ class ScrapeRequest(BaseModel):
     user_agent: str | None = None
     headers: dict[str, str] | None = None
     cookies: dict[str, str] | None = None
-    window_size: list[int] | None = None
+    window_size: list[int] | None = Field(default=None, min_length=2, max_length=2)
     lang: str | None = None
     headless: bool = False
     proxy: str | None = None

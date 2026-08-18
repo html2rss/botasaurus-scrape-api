@@ -872,12 +872,36 @@ class OpenApiContractTests(unittest.TestCase):
         for status in ("200", "400", "403", "422", "502", "504"):
             self.assertIn(status, responses)
 
-    def test_scrape_422_uses_scrape_envelope_not_fastapi_detail(self):
-        response_422 = self.schema["paths"]["/scrape"]["post"]["responses"]["422"]
-        refs = _schema_ref_names(response_422)
-        self.assertIn("ScrapeResponse", refs)
-        self.assertNotIn("HTTPValidationError", refs)
-        self.assertNotIn("ValidationError", refs)
+    def test_scrape_error_statuses_use_scrape_envelope_not_fastapi_detail(self):
+        responses = self.schema["paths"]["/scrape"]["post"]["responses"]
+        for status in ("400", "403", "422", "502", "504"):
+            with self.subTest(status=status):
+                refs = _schema_ref_names(responses[status])
+                self.assertIn("ScrapeResponse", refs)
+                self.assertNotIn("HTTPValidationError", refs)
+                self.assertNotIn("ValidationError", refs)
+
+    def test_wait_timeout_seconds_openapi_does_not_advertise_range_as_422(self):
+        props = self.schema["components"]["schemas"]["ScrapeRequest"]["properties"]
+        wait_schema = props["wait_timeout_seconds"]
+        self.assertNotIn("minimum", wait_schema)
+        self.assertNotIn("maximum", wait_schema)
+        description = wait_schema.get("description") or ""
+        self.assertIn("clamped", description)
+
+    def test_window_size_openapi_requires_two_ints(self):
+        props = self.schema["components"]["schemas"]["ScrapeRequest"]["properties"]
+        window_schema = props["window_size"]
+        # Optional field may wrap the array schema in anyOf with null.
+        array_schema = window_schema
+        if "anyOf" in window_schema:
+            array_schema = next(
+                part
+                for part in window_schema["anyOf"]
+                if part.get("type") == "array" or "items" in part
+            )
+        self.assertEqual(array_schema.get("minItems"), 2)
+        self.assertEqual(array_schema.get("maxItems"), 2)
 
     def test_health_schema_includes_status_fields(self):
         health_200 = self.schema["paths"]["/health"]["get"]["responses"]["200"]

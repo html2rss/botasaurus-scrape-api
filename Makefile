@@ -20,10 +20,10 @@ openapi:
 	python3 scripts/export_openapi.py --out $(OPENAPI_FILE)
 
 openapi-verify:
-	@tmp=$$(mktemp) && \
+	@tmp=$$(mktemp); \
+	trap 'rm -f $$tmp' EXIT; \
 	python3 scripts/export_openapi.py --out $$tmp && \
-	diff -u $(OPENAPI_FILE) $$tmp && \
-	rm -f $$tmp
+	diff -u $(OPENAPI_FILE) $$tmp
 
 check: lint test openapi-verify
 
