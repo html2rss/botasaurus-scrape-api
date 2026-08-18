@@ -2,19 +2,27 @@ import ipaddress
 import tempfile
 import unittest
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
 from app.detector import ChallengeDetector
-from app.engine import ScrapeRequest, ScrapeResponse, ScraperEngine
+from app.engine import (
+    DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    ScraperEngine,
+    ScrapeRequest,
+    ScrapeResponse,
+    html_document_headers,
+    utf8_normalize_html,
+)
 from app.metadata import MetadataExtractor
 from app.security import UrlGuard
 
 
 class _FakeMetadataResponse:
     status_code = 200
-    headers = {"content-type": "text/html"}
+    headers: ClassVar[dict[str, str]] = {"content-type": "text/html"}
     url = "https://example.com/"
 
 
@@ -64,6 +72,35 @@ class _CaptureDriver(_FakeDriver):
         super().__init__(*args, **kwargs)
 
 
+class _FakeHttpResponse:
+    def __init__(self, *, text, status_code, headers, url):
+        self.text = text
+        self.status_code = status_code
+        self.headers = headers
+        self.url = url
+
+
+class _FakeRequest:
+    response = None
+
+    def get(self, *_args, **_kwargs):
+        return type(self).response
+
+    def close(self):
+        return None
+
+
+class _ArticleDriver(_FakeDriver):
+    ARTICLE_HTML = (
+        "<html><body><article><h1>Headline</h1>"
+        "<p>Lead paragraph</p></article></body></html>"
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.page_html = self.ARTICLE_HTML
+
+
 class MainUnitTests(unittest.TestCase):
     def test_request_defaults(self):
         payload = ScrapeRequest(url="https://example.com")
@@ -101,13 +138,132 @@ class MainUnitTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ScrapeRequest(url="https://example.com", window_size=[1920])
 
+    def test_wait_timeout_seconds_clamps_gem_default_to_service_cap(self):
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=28)
+
+        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+        self.assertEqual(DEFAULT_SCRAPE_TIMEOUT_SECONDS, 20)
+        log_text = "\n".join(captured.output)
+        self.assertIn("host=example.com", log_text)
+        self.assertIn("field=wait_timeout_seconds", log_text)
+        self.assertIn("from=28", log_text)
+        self.assertIn("to=20", log_text)
+
+    def test_wait_timeout_seconds_clamps_below_one(self):
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=0)
+
+        self.assertEqual(payload.wait_timeout_seconds, 1)
+        log_text = "\n".join(captured.output)
+        self.assertIn("field=wait_timeout_seconds", log_text)
+        self.assertIn("from=0", log_text)
+        self.assertIn("to=1", log_text)
+
+    def test_clamped_wait_timeout_allows_execute(self):
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            wait_timeout_seconds=28,
+        )
+        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Driver", _FakeDriver):
+                result = engine.execute(payload)
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(
+            result["html"], "<html><body><h1>Example Domain</h1></body></html>"
+        )
+
+    def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
+        _FakeRequest.response = _FakeHttpResponse(
+            text="<html><body><h1>CaffÃ¨</h1></body></html>",
+            status_code=200,
+            headers={"content-type": "application/octet-stream"},
+            url="https://example.com/",
+        )
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="request",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(payload)
+
+        self.assertIsNone(result["error"])
+        self.assertEqual(result["execution_tier"], "http_request")
+        self.assertIsNotNone(result["headers"])
+        self.assertEqual(result["headers"]["content-type"], "text/html; charset=utf-8")
+        self.assertNotIn("application/octet-stream", result["headers"].values())
+        self.assertIn("Caffè", result["html"])
+        self.assertNotIn("CaffÃ¨", result["html"])
+        result["html"].encode("utf-8")
+
+    def test_utf8_normalize_leaves_correct_unicode_unchanged(self):
+        html = "<html><body><h1>Caffè 日本語</h1></body></html>"
+        self.assertEqual(utf8_normalize_html(html), html)
+
+        normalized, headers = html_document_headers(html, {"content-type": "text/html"})
+        self.assertEqual(normalized, html)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+
+        _FakeRequest.response = _FakeHttpResponse(
+            text=html,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+        payload = ScrapeRequest(url="https://example.com", execution_mode="request")
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(payload)
+
+        self.assertEqual(result["html"], html)
+        self.assertEqual(result["headers"]["content-type"], "text/html; charset=utf-8")
+
+    def test_request_tier_blocked_status_escalates_to_browser(self):
+        payload = ScrapeRequest(url="https://example.com")
+        for status in (401, 403, 429):
+            with self.subTest(status=status):
+                _FakeRequest.response = _FakeHttpResponse(
+                    text="<html><body>Forbidden</body></html>",
+                    status_code=status,
+                    headers={"content-type": "text/html"},
+                    url="https://example.com/",
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    engine = ScraperEngine(runtime_root=Path(tmp))
+                    with (
+                        patch("app.engine.Request", _FakeRequest),
+                        patch("app.engine.Driver", _ArticleDriver),
+                    ):
+                        result = engine.execute(payload)
+
+                self.assertIsNone(result["error"])
+                self.assertEqual(result["execution_tier"], "browser_driver")
+                self.assertIn("<article>", result["html"])
+                self.assertIn("Headline", result["html"])
+                self.assertEqual(
+                    result["headers"]["content-type"], "text/html; charset=utf-8"
+                )
+
     def test_strategy_selection(self):
         self.assertEqual(ScraperEngine.resolve_strategies("auto", 0), ["google_get"])
         self.assertEqual(
             ScraperEngine.resolve_strategies("auto", 2),
             ["google_get", "google_get_bypass", "get"],
         )
-        self.assertEqual(ScraperEngine.resolve_strategies("get", 2), ["get", "get", "get"])
+        self.assertEqual(
+            ScraperEngine.resolve_strategies("get", 2), ["get", "get", "get"]
+        )
         self.assertEqual(
             ScraperEngine.resolve_strategies("organic_get", 2),
             ["organic_get", "organic_get", "organic_get"],
@@ -157,9 +313,7 @@ class MainUnitTests(unittest.TestCase):
         self.assertIsNotNone(_CaptureDriver.last_init_kwargs)
         self.assertTrue(_CaptureDriver.last_init_kwargs["block_images"])
         self.assertTrue(_CaptureDriver.last_init_kwargs["block_images_and_css"])
-        self.assertFalse(
-            _CaptureDriver.last_init_kwargs["wait_for_complete_page_load"]
-        )
+        self.assertFalse(_CaptureDriver.last_init_kwargs["wait_for_complete_page_load"])
         self.assertEqual(_CaptureDriver.last_init_kwargs["user_agent"], "MyAgent/1.0")
         self.assertEqual(_CaptureDriver.last_init_kwargs["window_size"], [1920, 1080])
         self.assertEqual(_CaptureDriver.last_init_kwargs["lang"], "en-US")
@@ -235,7 +389,9 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         mock_driver = MagicMock()
         mock_driver.is_bot_detected.return_value = True
 
-        res = ChallengeDetector.detect("<html><body>Clean page</body></html>", 200, driver=mock_driver)
+        res = ChallengeDetector.detect(
+            "<html><body>Clean page</body></html>", 200, driver=mock_driver
+        )
         self.assertTrue(res.challenge_detected)
         self.assertTrue(res.blocked_detected)
         self.assertEqual(res.detected_marker, "botasaurus_driver_bot_detected")
@@ -246,11 +402,25 @@ class MetadataExtractorUnitTests(unittest.TestCase):
     def test_extract_passive_metadata_from_requests_list(self):
         class _Req:
             def __init__(self, status, headers, url):
-                self.response = type("Resp", (), {"status_code": status, "headers": headers})()
+                self.response = type(
+                    "Resp", (), {"status_code": status, "headers": headers}
+                )()
                 self.url = url
 
-        driver = type("D", (), {"requests": [_Req(200, {"content-type": "text/html"}, "https://example.com/final")]})()
-        status, headers, final_url = MetadataExtractor.extract_from_requests(driver, "https://example.com")
+        driver = type(
+            "D",
+            (),
+            {
+                "requests": [
+                    _Req(
+                        200, {"content-type": "text/html"}, "https://example.com/final"
+                    )
+                ]
+            },
+        )()
+        status, headers, final_url = MetadataExtractor.extract_from_requests(
+            driver, "https://example.com"
+        )
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
         self.assertEqual(final_url, "https://example.com/final")
@@ -280,9 +450,15 @@ class MetadataExtractorUnitTests(unittest.TestCase):
         driver = type(
             "D",
             (),
-            {"get_log": lambda self, log_type: perf_log if log_type == "performance" else []},
+            {
+                "get_log": lambda self, log_type: (
+                    perf_log if log_type == "performance" else []
+                )
+            },
         )()
-        status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(driver, "https://example.com")
+        status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(
+            driver, "https://example.com"
+        )
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
         self.assertEqual(final_url, "https://example.com/cdp-final")
@@ -352,6 +528,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertEqual(success["execution_tier"], "browser_driver")
         self.assertEqual(success["final_url"], "https://example.com")
         self.assertEqual(success["xhr_responses"], [])
+        self.assertEqual(success["headers"]["content-type"], "text/html; charset=utf-8")
 
         with_xhr = ScrapeResponse.create_success(
             "https://example.com",
@@ -595,6 +772,71 @@ class XhrCollectorTests(unittest.TestCase):
         self.assertEqual(len(second), 1)
         self.assertEqual(second[0]["body"], '{"from":"success-attempt"}')
         self.assertNotIn("failed-attempt", second[0]["body"])
+
+
+class SchemaValidationHttpTests(unittest.TestCase):
+    def test_schema_422_returns_scrape_envelope(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "window_size": [1920],
+                },
+            )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertNotIn("detail", body)
+        self.assertEqual(body["url"], "https://example.com")
+        self.assertTrue(body["error"])
+        self.assertIn("window_size", body["error"])
+        self.assertEqual(body["error_category"], "navigation_error")
+        self.assertTrue(body["request_id"])
+        log_text = "\n".join(captured.output)
+        self.assertIn("request_schema_422", log_text)
+        self.assertIn("host=example.com", log_text)
+        self.assertIn("field=window_size", log_text)
+
+    def test_scrape_clamps_wait_timeout_instead_of_422(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main_mod
+        from app.main import app
+
+        captured: dict[str, int] = {}
+
+        def fake_execute(payload, _deadline=None):
+            captured["wait"] = payload.wait_timeout_seconds
+            return ScrapeResponse.create_success(
+                str(payload.url),
+                request_id="req-wait-clamp",
+                html="<html></html>",
+                attempts=1,
+                strategy_used="anti_detect_request",
+                render_ms=1,
+                execution_tier="http_request",
+            )
+
+        with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "wait_timeout_seconds": 28,
+                },
+            )
+
+        self.assertNotEqual(response.status_code, 422)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["wait"], DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+        self.assertEqual(captured["wait"], 20)
 
 
 if __name__ == "__main__":

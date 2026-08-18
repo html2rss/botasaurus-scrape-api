@@ -6,6 +6,7 @@ Phase 0 finding: ``Network.getResponseBody`` deadlocks when called from inside a
 metadata / readiness; ``harvest()`` fetches bodies on the caller thread after
 navigation/scroll completes.
 """
+
 from __future__ import annotations
 
 import base64
@@ -87,9 +88,7 @@ class XhrCollector:
             ready = list(self._ready_ids)
             self._ready_ids.clear()
             jobs = [
-                (rid, self._pending.pop(rid))
-                for rid in ready
-                if rid in self._pending
+                (rid, self._pending.pop(rid)) for rid in ready if rid in self._pending
             ]
             aggregate_bytes = sum(
                 len(entry["body"].encode("utf-8")) for entry in self._collected

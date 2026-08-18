@@ -8,7 +8,7 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
   - `GET /health`
   - `POST /scrape`
 - Intended usage: run and test through Docker only.
-- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `25`).
+- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `20`).
 - On-demand isolation-first runtime: every scrape request runs with an ephemeral browser profile and request-scoped runtime dir, then gets fully cleaned up.
 
 ## Prerequisites
@@ -139,22 +139,19 @@ Request options (contract):
   - `organic_get`: only `organic_get`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
-- `wait_timeout_seconds`: selector wait timeout (default `15`, capped by service timeout).
+- `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default `20`) are clamped into that range so scrape still runs.
 - `scroll` / `scroll_to_bottom`: if true, scrolls the page to trigger lazy-loaded feeds (routes to browser tier).
 - `block_images`: pass image blocking to driver. Default `true`.
+- `block_images_and_css`: pass image+css blocking to driver. Default `false`.
 - `block_trackers`: block tracking/ad networks and web fonts to speed up rendering. Default `true`.
+- `wait_for_complete_page_load`: pass page-load wait behavior to driver. Default `true`.
+- `user_agent`: explicit user agent string passed to driver.
 - `headers`: custom HTTP request headers forwarded to request client or browser session.
 - `cookies`: key-value cookies map forwarded to request client or browser session.
-
-Currently accepted passthrough options (implemented, not part of stable request-options contract):
-
-- `block_images_and_css`: pass image+css blocking to driver.
-- `wait_for_complete_page_load`: pass page-load wait behavior to driver.
-- `user_agent`: explicit user agent string passed to driver.
 - `window_size`: two-item integer list `[width, height]` passed to driver.
 - `lang`: browser language passed to driver (for example `en-US`).
 - `headless`: pass headless browser mode to driver. Default `false`.
-- `proxy`: proxy URL passed to driver.
+- `proxy`: proxy URL passed to driver. Invalid or blocked proxy URLs are rejected by SSRF guardrails.
 
 Success response shape (legacy fields preserved, additive diagnostics included):
 
@@ -164,7 +161,7 @@ Success response shape (legacy fields preserved, additive diagnostics included):
   "final_url": "https://example.com/",
   "status_code": 200,
   "headers": {
-    "content-type": "text/html"
+    "content-type": "text/html; charset=utf-8"
   },
   "html": "<!doctype html>...",
   "error": null,
@@ -184,8 +181,8 @@ Success response shape (legacy fields preserved, additive diagnostics included):
 
 Field behavior:
 
-- `html`: rendered page HTML.
-- `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`.
+- `html`: rendered page HTML, UTF-8-normalized.
+- `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`. When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8`.
 - `error`: populated when scrape fails or challenge is detected on final attempt.
 - `metadata_error`: populated when metadata extraction fails but HTML scrape succeeds.
 - `request_id`: unique per request for tracing.
@@ -207,7 +204,7 @@ Status codes:
 - `200`: scrape completed without `error`.
 - `400`: URL rejected by validation (for example unresolved host).
 - `403`: URL blocked by SSRF guardrails.
-- `422`: request schema validation failed.
+- `422`: request schema validation failed. Body is the scrape error envelope (`url`, `error`, `error_category`, `request_id`), not FastAPI `{"detail":[...]}`.
 - `502`: scrape execution failure/challenge block.
 - `504`: scrape timed out.
 

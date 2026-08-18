@@ -1,4 +1,4 @@
-.PHONY: test build serve health scrape-example smoke lint check ready
+.PHONY: test build serve health scrape-example smoke lint lintfix check ready
 
 .DEFAULT_GOAL := check
 
@@ -7,9 +7,15 @@ PORT ?= 4010
 BASE_URL ?= http://localhost:$(PORT)
 
 lint:
+	ruff check .
+	ruff format --check .
 	docker run --rm -i hadolint/hadolint < Dockerfile
 
-check: lint
+lintfix:
+	ruff check --fix .
+	ruff format .
+
+check: lint test
 
 ready: check
 

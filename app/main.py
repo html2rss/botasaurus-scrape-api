@@ -2,24 +2,26 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from importlib.metadata import PackageNotFoundError, version
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
-from typing import AsyncGenerator
-from urllib.parse import urlparse
 import uuid
+from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
+from importlib.metadata import PackageNotFoundError, version
+from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.engine import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    ScraperEngine,
     ScrapeRequest,
     ScrapeResponse,
-    ScraperEngine,
     make_error_payload,
     make_validation_error_payload,
 )
@@ -38,7 +40,7 @@ if not logger.handlers:
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
+async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     yield
     _executor.shutdown(wait=False, cancel_futures=True)
 
@@ -48,6 +50,55 @@ app = FastAPI(
     version="1.3.0",
     lifespan=lifespan,
 )
+
+_NON_FIELD_LOC = {"body", "query", "path", "header"}
+
+
+def _schema_field_from_loc(loc: tuple[Any, ...] | list[Any]) -> str:
+    for part in loc:
+        if part not in _NON_FIELD_LOC:
+            return str(part)
+    return str(loc[-1]) if loc else "unknown"
+
+
+def _first_schema_field(errors: list[Any]) -> str:
+    if not errors:
+        return "unknown"
+    return _schema_field_from_loc(errors[0].get("loc") or ())
+
+
+def _url_from_validation_body(body: Any) -> str:
+    if isinstance(body, dict) and body.get("url") is not None:
+        return str(body["url"])
+    return ""
+
+
+def _validation_error_message(errors: list[Any]) -> str:
+    if not errors:
+        return "Request schema validation failed"
+    parts: list[str] = []
+    for err in errors:
+        field = _schema_field_from_loc(err.get("loc") or ())
+        parts.append(f"{field}: {err.get('msg') or 'invalid'}")
+    return "; ".join(parts)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_schema_validation_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    errors = list(exc.errors())
+    url = _url_from_validation_body(exc.body)
+    field = _first_schema_field(errors)
+    logger.info(
+        "request_schema_422 host=%s field=%s",
+        urlparse(url).hostname if url else None,
+        field,
+    )
+    return JSONResponse(
+        status_code=422,
+        content=make_validation_error_payload(url, _validation_error_message(errors)),
+    )
 
 
 @app.get("/health")
@@ -99,7 +150,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
             ),
             timeout=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
         timeout_result = make_error_payload(
             target_url,

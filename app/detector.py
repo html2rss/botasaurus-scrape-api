@@ -75,7 +75,9 @@ class ChallengeDetector:
             status_code in {401, 403, 429} if status_code is not None else False
         )
 
-        error_category = "challenge_block" if (challenge_detected or blocked_detected) else None
+        error_category = (
+            "challenge_block" if (challenge_detected or blocked_detected) else None
+        )
 
         return ChallengeAssessment(
             blocked_detected=blocked_detected,

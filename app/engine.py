@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 from botasaurus.browser import Driver
 from botasaurus.request import Request
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, ValidationInfo, field_validator
 
 from app.detector import ChallengeDetector
 from app.metadata import MetadataExtractor
@@ -26,7 +26,9 @@ DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
 _RUNTIME_ROOT = Path("/tmp/scrape")
 
 ExecutionMode = Literal["auto", "request", "browser"]
-NavigationMode = Literal["auto", "get", "google_get", "google_get_bypass", "organic_get"]
+NavigationMode = Literal[
+    "auto", "get", "google_get", "google_get_bypass", "organic_get"
+]
 ErrorCategory = Literal[
     "timeout", "challenge_block", "navigation_error", "metadata_error"
 ]
@@ -73,6 +75,28 @@ class ScrapeRequest(BaseModel):
     headless: bool = False
     proxy: str | None = None
 
+    @field_validator("wait_timeout_seconds", mode="before")
+    @classmethod
+    def clamp_wait_timeout_seconds(cls, value: Any, info: ValidationInfo) -> Any:
+        if value is None:
+            return value
+        try:
+            numeric = int(value)
+        except (TypeError, ValueError):  # fmt: skip
+            return value
+
+        clamped = max(1, min(numeric, DEFAULT_SCRAPE_TIMEOUT_SECONDS))
+        if clamped != numeric:
+            url = info.data.get("url")
+            logger.info(
+                "request_field_clamped host=%s field=%s from=%s to=%s",
+                urlparse(str(url)).hostname if url else None,
+                "wait_timeout_seconds",
+                numeric,
+                clamped,
+            )
+        return clamped
+
     @field_validator("window_size")
     @classmethod
     def validate_window_size(cls, value: list[int] | None) -> list[int] | None:
@@ -91,6 +115,36 @@ class ScrapeRequest(BaseModel):
         if self.headers:
             return self.headers.get("User-Agent") or self.headers.get("user-agent")
         return None
+
+
+HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
+
+
+def utf8_normalize_html(html: str) -> str:
+    if not html:
+        return html
+    if not isinstance(html, str):
+        html = str(html)
+    try:
+        html = html.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):  # fmt: skip
+        pass
+    return html.encode("utf-8", errors="replace").decode("utf-8")
+
+
+def html_document_headers(
+    html: str, headers: dict[str, str] | None
+) -> tuple[str, dict[str, str] | None]:
+    if not html:
+        return html, headers
+    normalized = utf8_normalize_html(html)
+    out: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        if str(key).lower() == "content-type":
+            continue
+        out[str(key)] = str(value)
+    out["content-type"] = HTML_DOCUMENT_CONTENT_TYPE
+    return normalized, out
 
 
 class ScrapeResponse(BaseModel):
@@ -134,6 +188,7 @@ class ScrapeResponse(BaseModel):
         detected_challenge: str | None = None,
         xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        html, headers = html_document_headers(html, headers)
         return cls(
             url=url,
             final_url=final_url or url,
@@ -176,6 +231,7 @@ class ScrapeResponse(BaseModel):
         metadata_error: str | None = None,
         xhr_responses: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
+        html, headers = html_document_headers(html, headers)
         return cls(
             url=url,
             final_url=final_url,
@@ -284,9 +340,7 @@ class ScraperEngine:
             self._active_request_ids.discard(request_id)
 
     @classmethod
-    def resolve_strategies(
-        cls, mode: NavigationMode, max_retries: int
-    ) -> list[str]:
+    def resolve_strategies(cls, mode: NavigationMode, max_retries: int) -> list[str]:
         max_attempts = 1 + max_retries
         if mode == "auto":
             ordered = ["google_get", "google_get_bypass", "get"]
@@ -298,11 +352,13 @@ class ScraperEngine:
         cls, driver: Driver, target_url: str, strategy: str, timeout_seconds: int
     ) -> None:
         if strategy == "organic_get":
-            method = getattr(driver, "organic_get", getattr(driver, "google_get", getattr(driver, "get")))
+            method = getattr(
+                driver, "organic_get", getattr(driver, "google_get", driver.get)
+            )
         elif strategy.startswith("google_get"):
-            method = getattr(driver, "google_get", getattr(driver, "get"))
+            method = getattr(driver, "google_get", driver.get)
         else:
-            method = getattr(driver, "get")
+            method = driver.get
 
         kwargs: dict[str, Any] = {}
         if strategy == "google_get_bypass":
@@ -441,16 +497,13 @@ class ScraperEngine:
         remaining_budget = max(
             1,
             int(
-                DEFAULT_SCRAPE_TIMEOUT_SECONDS
-                - (time.monotonic() - started_monotonic)
+                DEFAULT_SCRAPE_TIMEOUT_SECONDS - (time.monotonic() - started_monotonic)
             ),
         )
 
         req_headers = dict(payload.headers) if payload.headers else {}
         proxies = (
-            {"http": payload.proxy, "https": payload.proxy}
-            if payload.proxy
-            else None
+            {"http": payload.proxy, "https": payload.proxy} if payload.proxy else None
         )
 
         req = Request()
@@ -497,8 +550,12 @@ class ScraperEngine:
                 )
                 return None
 
-            error_msg = "Challenge block detected" if assessment.blocked_detected else None
-            error_cat: ErrorCategory | None = "challenge_block" if assessment.blocked_detected else None
+            error_msg = (
+                "Challenge block detected" if assessment.blocked_detected else None
+            )
+            error_cat: ErrorCategory | None = (
+                "challenge_block" if assessment.blocked_detected else None
+            )
 
             return ScrapeResponse.create_success(
                 target_url,
@@ -554,9 +611,7 @@ class ScraperEngine:
             lang=payload.lang,
             remove_default_browser_check_argument=True,
         )
-        self._configure_driver(
-            session.driver, payload, target_url, collector=collector
-        )
+        self._configure_driver(session.driver, payload, target_url, collector=collector)
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
@@ -572,9 +627,7 @@ class ScraperEngine:
                 self.wait_for_readiness(
                     session.driver,
                     selector=payload.wait_for_selector,
-                    timeout_seconds=min(
-                        payload.wait_timeout_seconds, remaining_budget
-                    ),
+                    timeout_seconds=min(payload.wait_timeout_seconds, remaining_budget),
                 )
 
                 if payload.should_scroll:
@@ -598,11 +651,11 @@ class ScraperEngine:
                             assessment = ChallengeDetector.detect(
                                 html, meta.status_code, driver=session.driver
                             )
-                            xhr_responses = self._harvest_xhr(
-                                collector, session.driver
-                            )
+                            xhr_responses = self._harvest_xhr(collector, session.driver)
                         except Exception as exc:
-                            logger.debug("bypass_cloudflare_attempt_failed error=%s", str(exc))
+                            logger.debug(
+                                "bypass_cloudflare_attempt_failed error=%s", str(exc)
+                            )
 
                 if assessment.challenge_detected or assessment.blocked_detected:
                     logger.warning(
@@ -715,14 +768,11 @@ class ScraperEngine:
             )
 
         with ScrapeSession(self, request_id) as session:
-            should_try_request_tier = (
-                payload.execution_mode == "request"
-                or (
-                    payload.execution_mode == "auto"
-                    and payload.navigation_mode == "auto"
-                    and not payload.wait_for_selector
-                    and not payload.should_scroll
-                )
+            should_try_request_tier = payload.execution_mode == "request" or (
+                payload.execution_mode == "auto"
+                and payload.navigation_mode == "auto"
+                and not payload.wait_for_selector
+                and not payload.should_scroll
             )
 
             if should_try_request_tier:

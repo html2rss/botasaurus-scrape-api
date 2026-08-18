@@ -9,8 +9,10 @@
 
 - Endpoints: `GET /health`, `POST /scrape`.
 - Stable legacy `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `error`, `metadata_error`.
+- When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
 - Additive diagnostics fields (current contract): `request_id`, `attempts`, `strategy_used`, `render_ms`, `blocked_detected`, `challenge_detected`, `error_category`, `execution_tier`, `detected_challenge`, `xhr_responses`.
-- Request options (current contract): `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `scroll_to_bottom`, `block_images`, `block_trackers`, `headers`, `cookies`.
+- Request options (current contract): `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `scroll_to_bottom`, `block_images`, `block_images_and_css`, `block_trackers`, `wait_for_complete_page_load`, `headers`, `cookies`, `user_agent`, `window_size`, `lang`, `headless`, `proxy`.
+- `wait_timeout_seconds` outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default 20) is clamped into that range so `/scrape` still runs; remaining schema 422 bodies use the scrape envelope (`url`, `error`, `error_category`, `request_id`), not FastAPI `detail`.
 - Error codes:
   - `400` validation/resolution failure
   - `403` SSRF guardrail block
