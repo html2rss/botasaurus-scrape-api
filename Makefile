@@ -1,10 +1,11 @@
-.PHONY: test build serve health scrape-example smoke lint lintfix check ready
+.PHONY: test build serve health scrape-example smoke lint lintfix check ready openapi openapi-verify
 
 .DEFAULT_GOAL := check
 
 IMAGE ?= botasaurus-api
 PORT ?= 4010
 BASE_URL ?= http://localhost:$(PORT)
+OPENAPI_FILE ?= openapi.yaml
 
 lint:
 	ruff check .
@@ -15,7 +16,16 @@ lintfix:
 	ruff check --fix .
 	ruff format .
 
-check: lint test
+openapi:
+	python3 scripts/export_openapi.py --out $(OPENAPI_FILE)
+
+openapi-verify:
+	@tmp=$$(mktemp) && \
+	python3 scripts/export_openapi.py --out $$tmp && \
+	diff -u $(OPENAPI_FILE) $$tmp && \
+	rm -f $$tmp
+
+check: lint test openapi-verify
 
 ready: check
 
