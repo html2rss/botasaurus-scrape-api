@@ -1,21 +1,38 @@
-.PHONY: test build serve health scrape-example smoke lint lintfix check ready
+.PHONY: test build serve health scrape-example smoke lint lintfix check ready openapi openapi-verify spectral
 
 .DEFAULT_GOAL := check
 
 IMAGE ?= botasaurus-api
 PORT ?= 4010
 BASE_URL ?= http://localhost:$(PORT)
+OPENAPI_FILE ?= openapi.yaml
+SPECTRAL_IMAGE ?= stoplight/spectral:6
 
 lint:
 	ruff check .
 	ruff format --check .
 	docker run --rm -i hadolint/hadolint < Dockerfile
+	$(MAKE) spectral
 
 lintfix:
 	ruff check --fix .
 	ruff format .
 
-check: lint test
+spectral:
+	docker run --rm -e DO_NOT_TRACK=1 \
+		-v "$(CURDIR)":/spec:ro $(SPECTRAL_IMAGE) \
+		lint --fail-severity=warn --ruleset /spec/.spectral.yaml /spec/openapi.yaml
+
+openapi:
+	python3 scripts/export_openapi.py --out $(OPENAPI_FILE)
+
+openapi-verify:
+	@tmp=$$(mktemp); \
+	trap 'rm -f $$tmp' EXIT; \
+	python3 scripts/export_openapi.py --out $$tmp && \
+	diff -u $(OPENAPI_FILE) $$tmp
+
+check: lint test openapi-verify
 
 ready: check
 

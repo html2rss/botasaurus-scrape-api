@@ -72,6 +72,19 @@ Expected result: script prints `[smoke] PASS` and exits `0`.
 
 ## API Contract
 
+Machine-readable contract: [`openapi.yaml`](openapi.yaml), generated from the FastAPI app with `make openapi`. Do not hand-edit it. `make check` runs `make openapi-verify` and fails if the snapshot does not match a fresh `app.openapi()` dump.
+
+A running container also serves FastAPI's live schema and UIs at `/openapi.json`, `/docs`, and `/redoc`. Those are framework defaults, not additional scrape endpoints.
+
+Human examples follow. OpenAPI 2.0.0 is a breaking wire cut from 1.x:
+
+- `scroll_to_bottom` → `scroll` (scroll means scroll-to-bottom / lazy-load)
+- `window_size: [w, h]` → `{ "width": w, "height": h }`
+- `blocked_detected` / `challenge_detected` / `detected_challenge` → `diagnostics.challenge.{blocked,detected,marker}`
+- `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier` → `diagnostics.*`
+- error bodies no longer include `html`; 400/422 `error_category` is `validation`
+- schema names `ScrapeResponse` → `ScrapeSuccess` + `ScrapeError`
+
 ### `GET /health`
 
 Returns service status and detected Botasaurus version.
@@ -106,6 +119,7 @@ Request body (full options):
   "max_retries": 2,
   "wait_for_selector": "h1",
   "wait_timeout_seconds": 15,
+  "scroll": true,
   "block_images": true,
   "block_images_and_css": false,
   "block_trackers": true,
@@ -118,7 +132,7 @@ Request body (full options):
   "cookies": {
     "session": "..."
   },
-  "window_size": [1920, 1080],
+  "window_size": {"width": 1920, "height": 1080},
   "lang": "en-US",
   "headless": false,
   "proxy": "http://user:pass@proxy:port"
@@ -140,7 +154,7 @@ Request options (contract):
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
 - `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default `20`) are clamped into that range so scrape still runs.
-- `scroll` / `scroll_to_bottom`: if true, scrolls the page to trigger lazy-loaded feeds (routes to browser tier).
+- `scroll`: if true, scrolls to the bottom to trigger lazy-loaded feeds (routes to browser tier).
 - `block_images`: pass image blocking to driver. Default `true`.
 - `block_images_and_css`: pass image+css blocking to driver. Default `false`.
 - `block_trackers`: block tracking/ad networks and web fonts to speed up rendering. Default `true`.
@@ -148,12 +162,12 @@ Request options (contract):
 - `user_agent`: explicit user agent string passed to driver.
 - `headers`: custom HTTP request headers forwarded to request client or browser session.
 - `cookies`: key-value cookies map forwarded to request client or browser session.
-- `window_size`: two-item integer list `[width, height]` passed to driver.
+- `window_size`: viewport object `{ "width": 1920, "height": 1080 }` passed to driver.
 - `lang`: browser language passed to driver (for example `en-US`).
 - `headless`: pass headless browser mode to driver. Default `false`.
 - `proxy`: proxy URL passed to driver. Invalid or blocked proxy URLs are rejected by SSRF guardrails.
 
-Success response shape (legacy fields preserved, additive diagnostics included):
+Success response (`ScrapeSuccess`, HTTP 200):
 
 ```json
 {
@@ -164,47 +178,67 @@ Success response shape (legacy fields preserved, additive diagnostics included):
     "content-type": "text/html; charset=utf-8"
   },
   "html": "<!doctype html>...",
-  "error": null,
   "metadata_error": null,
-  "request_id": "b01ef2f8-f641-4e75-8ef2-0b73f7b4f372",
-  "attempts": 1,
-  "strategy_used": "anti_detect_request",
-  "render_ms": 154,
-  "blocked_detected": false,
-  "challenge_detected": false,
-  "error_category": null,
-  "execution_tier": "http_request",
-  "detected_challenge": null,
-  "xhr_responses": []
+  "xhr_responses": [],
+  "diagnostics": {
+    "request_id": "b01ef2f8-f641-4e75-8ef2-0b73f7b4f372",
+    "attempts": 1,
+    "strategy_used": null,
+    "render_ms": 154,
+    "execution_tier": "http_request",
+    "challenge": {
+      "blocked": false,
+      "detected": false,
+      "marker": null
+    }
+  }
+}
+```
+
+Error response (`ScrapeError`, HTTP 400/403/422/502/504). No `html`:
+
+```json
+{
+  "url": "https://example.com",
+  "error": "Target URL is blocked",
+  "error_category": "validation",
+  "diagnostics": {
+    "request_id": "b01ef2f8-f641-4e75-8ef2-0b73f7b4f372",
+    "attempts": 0,
+    "strategy_used": null,
+    "render_ms": 0,
+    "execution_tier": null,
+    "challenge": null
+  }
 }
 ```
 
 Field behavior:
 
-- `html`: rendered page HTML, UTF-8-normalized.
+- `html`: rendered page HTML, UTF-8-normalized. Present on success only.
 - `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`. When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8`.
-- `error`: populated when scrape fails or challenge is detected on final attempt.
+- `error`: failure message on `ScrapeError`.
 - `metadata_error`: populated when metadata extraction fails but HTML scrape succeeds.
-- `request_id`: unique per request for tracing.
-- `attempts`: actual attempts performed.
-- `strategy_used`: strategy used on final attempt.
-- `render_ms`: elapsed render/runtime milliseconds.
-- `blocked_detected` / `challenge_detected`: anti-bot signal flags from HTML/status markers.
-- `execution_tier`: `http_request` or `browser_driver`.
-- `detected_challenge`: specific challenge marker matched, if any.
+- `diagnostics.request_id`: unique per request for tracing.
+- `diagnostics.attempts`: actual attempts performed.
+- `diagnostics.strategy_used`: browser navigation strategy on the final attempt, or `null` on the HTTP-request tier.
+- `diagnostics.render_ms`: elapsed render/runtime milliseconds.
+- `diagnostics.execution_tier`: `http_request` or `browser_driver`.
+- `diagnostics.challenge`: anti-bot assessment (`blocked`, `detected`, `marker`), or `null` when detection did not run.
 - `xhr_responses`: always-on additive list of JSON XHR/fetch sub-resource bodies captured during the browser tier (empty for HTTP-request tier). Each entry is `{url, status_code, headers, body}`. `headers` keep only `content-type` (Set-Cookie and other headers are dropped). Caps: at most 20 responses, 500 KB per body, 2 MB aggregate across bodies. Main document responses are excluded. Collector state is reset between strategy retries so challenge interstitials do not pollute a later successful attempt. Candidate filtering for article-likeness is a client concern.
 - `error_category`:
   - `timeout`
   - `challenge_block`
   - `navigation_error`
   - `metadata_error`
+  - `validation` (400 URL rejection and 422 schema failures)
 
 Status codes:
 
-- `200`: scrape completed without `error`.
-- `400`: URL rejected by validation (for example unresolved host).
+- `200`: scrape completed (`ScrapeSuccess`).
+- `400`: URL rejected by validation (for example unresolved host). `error_category` is `validation`.
 - `403`: URL blocked by SSRF guardrails.
-- `422`: request schema validation failed. Body is the scrape error envelope (`url`, `error`, `error_category`, `request_id`), not FastAPI `{"detail":[...]}`.
+- `422`: request schema validation failed. Body is the scrape error envelope (`url`, `error`, `error_category`, `diagnostics`), not FastAPI `{"detail":[...]}`. `error_category` is `validation`.
 - `502`: scrape execution failure/challenge block.
 - `504`: scrape timed out.
 
@@ -299,10 +333,13 @@ Note: if your IP is already flagged, you may still get challenge pages. In that 
 
 ## Make Targets
 
-- `make` / `make check`: lint the Dockerfile with Hadolint (Docker).
-- `make lint`: same as `make check`.
-- `make ready`: same as `make check` (pre-PR lint gate; run `make smoke` when Docker behavior changes).
+- `make` / `make check`: Ruff, Hadolint, Spectral, unit tests, and `make openapi-verify`.
+- `make lint`: Ruff plus Hadolint plus Spectral.
+- `make spectral`: lint `openapi.yaml` with Spectral in Docker (`stoplight/spectral:6`).
+- `make ready`: same as `make check` (pre-PR gate; run `make smoke` when Docker behavior changes).
 - `make test`: run host unit tests.
+- `make openapi`: regenerate `openapi.yaml` from `app.openapi()`.
+- `make openapi-verify`: fail if `openapi.yaml` does not match a fresh dump.
 - `make build`: build Docker image.
 - `make serve`: build and run API container on `localhost:4010`.
 - `make health`: call `GET /health` on running service.

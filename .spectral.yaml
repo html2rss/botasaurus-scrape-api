@@ -1,0 +1,16 @@
+extends: [[spectral:oas, recommended]]
+rules:
+  info-license: error
+  license-url: error
+  tag-description: error
+  operation-singular-tag: error
+  oas3-api-servers: error
+  schema-property-description:
+    description: Every component schema property must have a description.
+    message: "{{property}} is missing a description"
+    given: $.components.schemas[*].properties[*]
+    resolved: false
+    severity: error
+    then:
+      field: description
+      function: truthy
