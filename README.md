@@ -72,6 +72,12 @@ Expected result: script prints `[smoke] PASS` and exits `0`.
 
 ## API Contract
 
+Machine-readable contract: [`openapi.yaml`](openapi.yaml), generated from the FastAPI app with `make openapi`. Do not hand-edit it. `make check` runs `make openapi-verify` and fails if the snapshot does not match a fresh `app.openapi()` dump.
+
+A running container also serves FastAPI's live schema and UIs at `/openapi.json`, `/docs`, and `/redoc`. Those are framework defaults, not additional scrape endpoints.
+
+Human examples follow.
+
 ### `GET /health`
 
 Returns service status and detected Botasaurus version.

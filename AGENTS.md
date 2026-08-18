@@ -8,6 +8,7 @@
 ## Contract (Do Not Break)
 
 - Endpoints: `GET /health`, `POST /scrape`.
+- `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`.
 - Stable legacy `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `error`, `metadata_error`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
 - Additive diagnostics fields (current contract): `request_id`, `attempts`, `strategy_used`, `render_ms`, `blocked_detected`, `challenge_detected`, `error_category`, `execution_tier`, `detected_challenge`, `xhr_responses`.
@@ -49,6 +50,7 @@
 ## Done Criteria
 
 - Run `make check` before finish.
+- When Pydantic models or route response metadata change, run `make openapi` and commit the snapshot with the code change.
 - When API contract, Docker behavior, or error semantics change, also run `make smoke`.
 - `make smoke` must cover build, boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation check, localhost guardrail.
 - If API contract, Docker behavior, or error semantics changed, update README in same change.
