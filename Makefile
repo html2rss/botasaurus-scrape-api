@@ -1,8 +1,17 @@
-.PHONY: test build serve health scrape-example smoke
+.PHONY: test build serve health scrape-example smoke lint check ready
+
+.DEFAULT_GOAL := check
 
 IMAGE ?= botasaurus-api
 PORT ?= 4010
 BASE_URL ?= http://localhost:$(PORT)
+
+lint:
+	docker run --rm -i hadolint/hadolint < Dockerfile
+
+check: lint
+
+ready: check
 
 test:
 	python3 -m unittest discover -s tests
