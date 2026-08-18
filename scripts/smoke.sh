@@ -40,10 +40,18 @@ import json
 import os
 import sys
 
+def lookup(obj, key):
+    cur = obj
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
 key = sys.argv[1]
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-value = obj.get(key)
+value = lookup(obj, key)
 if value in (None, ""):
     raise SystemExit(1)
 PY
@@ -59,12 +67,22 @@ import json
 import os
 import sys
 
+def lookup(obj, key):
+    cur = obj
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
 key = sys.argv[1]
 expected = sys.argv[2]
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-actual = str(obj.get(key))
-if actual != expected:
+actual = lookup(obj, key)
+if actual is None:
+    raise SystemExit(1)
+if str(actual) != expected:
     raise SystemExit(1)
 PY
 }
@@ -99,7 +117,7 @@ import sys
 minimum = int(sys.argv[1])
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-attempts = int(obj.get("attempts") or 0)
+attempts = int((obj.get("diagnostics") or {}).get("attempts") or 0)
 if attempts < minimum:
     raise SystemExit(1)
 PY
@@ -114,10 +132,18 @@ import json
 import os
 import sys
 
+def lookup(obj, key):
+    cur = obj
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
 key = sys.argv[1]
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-if obj.get(key) is not True:
+if lookup(obj, key) is not True:
     raise SystemExit(1)
 PY
 }
@@ -131,10 +157,18 @@ import json
 import os
 import sys
 
+def lookup(obj, key):
+    cur = obj
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
 key = sys.argv[1]
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-if obj.get(key) is not False:
+if lookup(obj, key) is not False:
     raise SystemExit(1)
 PY
 }
@@ -149,11 +183,19 @@ import json
 import os
 import sys
 
+def lookup(obj, key):
+    cur = obj
+    for part in key.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
 key = sys.argv[1]
 minimum = int(sys.argv[2])
 raw = os.environ["JSON_INPUT"]
 obj = json.loads(raw)
-value = int(obj.get(key) or 0)
+value = int(lookup(obj, key) or 0)
 if value < minimum:
     raise SystemExit(1)
 PY
@@ -217,28 +259,28 @@ scrape_code="$(echo "$scrape_response" | tail -n1)"
 [[ "$scrape_code" == "200" ]] || fail "Expected /scrape happy path 200, got ${scrape_code}"
 assert_json_key_nonempty "$scrape_body" "html" || fail "Scrape html is empty"
 assert_html_contains "$scrape_body" "Example Domain" || fail "Scrape html missing expected marker"
-assert_json_key_nonempty "$scrape_body" "request_id" || fail "Missing request_id"
+assert_json_key_nonempty "$scrape_body" "diagnostics.request_id" || fail "Missing diagnostics.request_id"
 assert_json_attempts_gte "$scrape_body" 1 || fail "Expected attempts >= 1"
-assert_json_key_nonempty "$scrape_body" "strategy_used" || fail "Missing strategy_used"
-assert_json_key_int_gte "$scrape_body" "render_ms" 1 || fail "Expected render_ms > 0"
-assert_json_key_false "$scrape_body" "blocked_detected" || fail "Expected blocked_detected false"
-assert_json_key_false "$scrape_body" "challenge_detected" || fail "Expected challenge_detected false"
+assert_json_key_equals "$scrape_body" "diagnostics.execution_tier" "http_request" || fail "Expected execution_tier=http_request"
+assert_json_key_int_gte "$scrape_body" "diagnostics.render_ms" 1 || fail "Expected render_ms > 0"
+assert_json_key_false "$scrape_body" "diagnostics.challenge.blocked" || fail "Expected challenge.blocked false"
+assert_json_key_false "$scrape_body" "diagnostics.challenge.detected" || fail "Expected challenge.detected false"
 
 echo "[smoke] Checking explicit strategy override"
 strategy_response="$(http_post "/scrape" '{"url":"https://example.com","navigation_mode":"google_get_bypass","max_retries":0}')"
 strategy_body="$(echo "$strategy_response" | sed '$d')"
 strategy_code="$(echo "$strategy_response" | tail -n1)"
 [[ "$strategy_code" == "200" ]] || fail "Expected explicit strategy scrape 200, got ${strategy_code}"
-assert_json_key_equals "$strategy_body" "attempts" "1" || fail "Expected attempts=1 for max_retries=0"
-assert_json_key_equals "$strategy_body" "strategy_used" "google_get_bypass" || fail "Expected strategy_used=google_get_bypass"
+assert_json_key_equals "$strategy_body" "diagnostics.attempts" "1" || fail "Expected attempts=1 for max_retries=0"
+assert_json_key_equals "$strategy_body" "diagnostics.strategy_used" "google_get_bypass" || fail "Expected strategy_used=google_get_bypass"
 
 echo "[smoke] Checking retry path + final strategy in auto mode"
 retry_response="$(http_post "/scrape" '{"url":"https://example.com","navigation_mode":"auto","max_retries":2,"wait_for_selector":"#definitely-missing-selector","wait_timeout_seconds":1}')"
 retry_body="$(echo "$retry_response" | sed '$d')"
 retry_code="$(echo "$retry_response" | tail -n1)"
 [[ "$retry_code" == "502" ]] || fail "Expected retry failure 502, got ${retry_code}"
-assert_json_key_equals "$retry_body" "attempts" "3" || fail "Expected auto mode to attempt 3 strategies"
-assert_json_key_equals "$retry_body" "strategy_used" "get" || fail "Expected final strategy_used=get"
+assert_json_key_equals "$retry_body" "diagnostics.attempts" "3" || fail "Expected auto mode to attempt 3 strategies"
+assert_json_key_equals "$retry_body" "diagnostics.strategy_used" "get" || fail "Expected final strategy_used=get"
 assert_json_key_equals "$retry_body" "error_category" "navigation_error" || fail "Expected navigation_error category"
 
 echo "[smoke] Checking per-request isolation (no cookie leak)"
@@ -265,8 +307,7 @@ request_tier_response="$(http_post "/scrape" '{"url":"https://example.com","exec
 request_tier_body="$(echo "$request_tier_response" | sed '$d')"
 request_tier_code="$(echo "$request_tier_response" | tail -n1)"
 [[ "$request_tier_code" == "200" ]] || fail "Expected execution_mode=request 200, got ${request_tier_code}"
-assert_json_key_equals "$request_tier_body" "execution_tier" "http_request" || fail "Expected execution_tier=http_request"
-assert_json_key_equals "$request_tier_body" "strategy_used" "anti_detect_request" || fail "Expected strategy_used=anti_detect_request"
+assert_json_key_equals "$request_tier_body" "diagnostics.execution_tier" "http_request" || fail "Expected execution_tier=http_request"
 assert_html_contains "$request_tier_body" "Example Domain" || fail "request tier html missing marker"
 
 echo "[smoke] Checking custom headers and cookies propagation"
@@ -281,13 +322,13 @@ organic_response="$(http_post "/scrape" '{"url":"https://example.com","navigatio
 organic_body="$(echo "$organic_response" | sed '$d')"
 organic_code="$(echo "$organic_response" | tail -n1)"
 [[ "$organic_code" == "200" ]] || fail "Expected organic_get scrape 200, got ${organic_code}"
-assert_json_key_equals "$organic_body" "strategy_used" "organic_get" || fail "Expected strategy_used=organic_get"
+assert_json_key_equals "$organic_body" "diagnostics.strategy_used" "organic_get" || fail "Expected strategy_used=organic_get"
 
-echo "[smoke] Checking scroll_to_bottom parameter"
+echo "[smoke] Checking scroll parameter"
 scroll_response="$(http_post "/scrape" '{"url":"https://example.com","scroll":true,"headless":true}')"
 scroll_body="$(echo "$scroll_response" | sed '$d')"
 scroll_code="$(echo "$scroll_response" | tail -n1)"
 [[ "$scroll_code" == "200" ]] || fail "Expected scroll scrape 200, got ${scroll_code}"
-assert_json_key_equals "$scroll_body" "execution_tier" "browser_driver" || fail "Expected execution_tier=browser_driver for scroll"
+assert_json_key_equals "$scroll_body" "diagnostics.execution_tier" "browser_driver" || fail "Expected execution_tier=browser_driver for scroll"
 
 echo "[smoke] PASS"

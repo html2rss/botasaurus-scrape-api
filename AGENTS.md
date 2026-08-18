@@ -8,12 +8,16 @@
 ## Contract (Do Not Break)
 
 - Endpoints: `GET /health`, `POST /scrape`.
-- `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`.
-- Stable legacy `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `error`, `metadata_error`.
+- `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`. Spectral (`make spectral`) lints the snapshot; do not add a post-processor that mutates the dump.
+- Wire types live in `app/schemas.py`. Engine imports them. Routes `model_dump()` once into `JSONResponse`.
+- OpenAPI `info.version` is `2.0.0`. Schema names: `ScrapeSuccess` (200) and `ScrapeError` (400/403/422/502/504). No `ScrapeResponse` alias.
+- Success `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `metadata_error`, `xhr_responses`, `diagnostics`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
-- Additive diagnostics fields (current contract): `request_id`, `attempts`, `strategy_used`, `render_ms`, `blocked_detected`, `challenge_detected`, `error_category`, `execution_tier`, `detected_challenge`, `xhr_responses`.
-- Request options (current contract): `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `scroll_to_bottom`, `block_images`, `block_images_and_css`, `block_trackers`, `wait_for_complete_page_load`, `headers`, `cookies`, `user_agent`, `window_size`, `lang`, `headless`, `proxy`.
-- `wait_timeout_seconds` outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default 20) is clamped into that range so `/scrape` still runs; remaining schema 422 bodies use the scrape envelope (`url`, `error`, `error_category`, `request_id`), not FastAPI `detail`.
+- Error `/scrape` fields: `url`, `error`, `error_category`, `diagnostics`. No `html`.
+- `diagnostics`: `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier`, `challenge` (`blocked`, `detected`, `marker`).
+- Request options: `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `block_images`, `block_images_and_css`, `block_trackers`, `wait_for_complete_page_load`, `headers`, `cookies`, `user_agent`, `window_size` (`{width, height}`), `lang`, `headless`, `proxy`. `scroll` means scroll-to-bottom / lazy-load. No `scroll_to_bottom`.
+- `wait_timeout_seconds` outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default 20) is clamped into that range so `/scrape` still runs; remaining schema 422 bodies use the scrape error envelope (`url`, `error`, `error_category`, `diagnostics`), not FastAPI `detail`. Do not advertise `minimum`/`maximum` as 422.
+- `error_category`: `timeout`, `challenge_block`, `navigation_error`, `metadata_error`, `validation`. 400/422 use `validation`.
 - Error codes:
   - `400` validation/resolution failure
   - `403` SSRF guardrail block
