@@ -147,6 +147,13 @@ def html_document_headers(
     return normalized, out
 
 
+class XhrResponse(BaseModel):
+    url: str
+    status_code: int
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str
+
+
 class ScrapeResponse(BaseModel):
     url: str
     final_url: str | None = None
@@ -164,7 +171,7 @@ class ScrapeResponse(BaseModel):
     error_category: ErrorCategory | None = None
     execution_tier: str | None = None
     detected_challenge: str | None = None
-    xhr_responses: list[dict[str, Any]] = Field(default_factory=list)
+    xhr_responses: list[XhrResponse] = Field(default_factory=list)
 
     @classmethod
     def create_success(

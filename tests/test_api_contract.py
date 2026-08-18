@@ -839,5 +839,65 @@ class SchemaValidationHttpTests(unittest.TestCase):
         self.assertEqual(captured["wait"], 20)
 
 
+def _schema_ref_names(node: object) -> set[str]:
+    names: set[str] = set()
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and "/schemas/" in ref:
+            names.add(ref.rsplit("/", 1)[-1])
+        for value in node.values():
+            names |= _schema_ref_names(value)
+    elif isinstance(node, list):
+        for item in node:
+            names |= _schema_ref_names(item)
+    return names
+
+
+class OpenApiContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from app.main import app
+
+        cls.schema = app.openapi()
+
+    def test_documents_health_and_scrape_paths(self):
+        paths = self.schema["paths"]
+        self.assertIn("/health", paths)
+        self.assertIn("get", paths["/health"])
+        self.assertIn("/scrape", paths)
+        self.assertIn("post", paths["/scrape"])
+
+    def test_scrape_documents_contract_status_codes(self):
+        responses = self.schema["paths"]["/scrape"]["post"]["responses"]
+        for status in ("200", "400", "403", "422", "502", "504"):
+            self.assertIn(status, responses)
+
+    def test_scrape_422_uses_scrape_envelope_not_fastapi_detail(self):
+        response_422 = self.schema["paths"]["/scrape"]["post"]["responses"]["422"]
+        refs = _schema_ref_names(response_422)
+        self.assertIn("ScrapeResponse", refs)
+        self.assertNotIn("HTTPValidationError", refs)
+        self.assertNotIn("ValidationError", refs)
+
+    def test_health_schema_includes_status_fields(self):
+        health_200 = self.schema["paths"]["/health"]["get"]["responses"]["200"]
+        refs = _schema_ref_names(health_200)
+        self.assertIn("HealthResponse", refs)
+        health_schema = self.schema["components"]["schemas"]["HealthResponse"]
+        properties = health_schema["properties"]
+        self.assertIn("status", properties)
+        self.assertIn("service", properties)
+        self.assertIn("botasaurus_version", properties)
+
+    def test_xhr_responses_use_xhr_response_model(self):
+        scrape_schema = self.schema["components"]["schemas"]["ScrapeResponse"]
+        refs = _schema_ref_names(scrape_schema["properties"]["xhr_responses"])
+        self.assertIn("XhrResponse", refs)
+        xhr_schema = self.schema["components"]["schemas"]["XhrResponse"]
+        properties = xhr_schema["properties"]
+        for field in ("url", "status_code", "headers", "body"):
+            self.assertIn(field, properties)
+
+
 if __name__ == "__main__":
     unittest.main()

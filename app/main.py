@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.engine import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
@@ -52,6 +53,34 @@ app = FastAPI(
 )
 
 _NON_FIELD_LOC = {"body", "query", "path", "header"}
+_SCRAPE_ERROR_RESPONSES = {
+    400: {
+        "model": ScrapeResponse,
+        "description": "URL rejected by validation",
+    },
+    403: {
+        "model": ScrapeResponse,
+        "description": "URL blocked by SSRF guardrails",
+    },
+    422: {
+        "model": ScrapeResponse,
+        "description": "Request schema validation failed",
+    },
+    502: {
+        "model": ScrapeResponse,
+        "description": "Scrape execution failure",
+    },
+    504: {
+        "model": ScrapeResponse,
+        "description": "Scrape timed out",
+    },
+}
+
+
+class HealthResponse(BaseModel):
+    status: str
+    service: str
+    botasaurus_version: str
 
 
 def _schema_field_from_loc(loc: tuple[Any, ...] | list[Any]) -> str:
@@ -101,21 +130,25 @@ async def request_schema_validation_handler(
     )
 
 
-@app.get("/health")
-def health() -> dict[str, str]:
+@app.get("/health", response_model=HealthResponse)
+def health() -> HealthResponse:
     try:
         botasaurus_version = version("botasaurus")
     except PackageNotFoundError:
         botasaurus_version = "unknown"
 
-    return {
-        "status": "ok",
-        "service": "botasaurus-scrape-api",
-        "botasaurus_version": botasaurus_version,
-    }
+    return HealthResponse(
+        status="ok",
+        service="botasaurus-scrape-api",
+        botasaurus_version=botasaurus_version,
+    )
 
 
-@app.post("/scrape", response_model=ScrapeResponse)
+@app.post(
+    "/scrape",
+    response_model=ScrapeResponse,
+    responses=_SCRAPE_ERROR_RESPONSES,
+)
 async def scrape(payload: ScrapeRequest) -> JSONResponse:
     target_url = str(payload.url)
     target_validation = UrlGuard.validate(target_url)
