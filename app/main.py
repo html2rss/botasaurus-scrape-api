@@ -5,20 +5,21 @@ import asyncio
 import logging
 import os
 import time
-import uuid
 from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from functools import partial
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.engine import DEFAULT_SCRAPE_TIMEOUT_SECONDS, ScraperEngine
 from app.ops_telemetry import emit_terminal_telemetry
+from app.request_id import resolve_request_id
 from app.schemas import (
     HEALTH_EXAMPLE,
     SCRAPE_ERROR_EXAMPLE,
@@ -200,11 +201,15 @@ def _json(model: ScrapeSuccess | ScrapeError) -> dict[str, Any]:
 
 @app.exception_handler(RequestValidationError)
 async def request_schema_validation_handler(
-    _request: Request, exc: RequestValidationError
+    request: Request, exc: RequestValidationError
 ) -> JSONResponse:
     errors = list(exc.errors())
     url = _url_from_validation_body(exc.body)
     field = _first_schema_field(errors)
+    request_id, _ = resolve_request_id(
+        request.headers.get("X-Request-Id"),
+        host=urlparse(url).hostname if url else None,
+    )
     logger.info(
         "request_schema_422 host=%s field=%s",
         urlparse(url).hostname if url else None,
@@ -212,7 +217,13 @@ async def request_schema_validation_handler(
     )
     return JSONResponse(
         status_code=422,
-        content=_json(validation_error(url, _validation_error_message(errors))),
+        content=_json(
+            validation_error(
+                url,
+                _validation_error_message(errors),
+                request_id=request_id,
+            )
+        ),
     )
 
 
@@ -261,8 +272,14 @@ def health() -> HealthResponse:
         "targets return `ScrapeError`. `wait_timeout_seconds` is clamped, not 422."
     ),
 )
-async def scrape(payload: ScrapeRequest) -> JSONResponse:
+async def scrape(
+    payload: ScrapeRequest,
+    x_request_id: str | None = Header(None, alias="X-Request-Id"),
+) -> JSONResponse:
     target_url = str(payload.url)
+    target_host = urlparse(target_url).hostname
+    request_id, _ = resolve_request_id(x_request_id, host=target_host)
+
     target_validation = UrlGuard.validate(target_url)
     if not target_validation.is_allowed:
         return JSONResponse(
@@ -271,6 +288,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
                 validation_error(
                     target_url,
                     target_validation.error_message or "Target URL is blocked",
+                    request_id=request_id,
                 )
             ),
         )
@@ -285,6 +303,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
                         target_url,
                         proxy_validation.error_message
                         or "Proxy URL is invalid or blocked",
+                        request_id=request_id,
                     )
                 ),
             )
@@ -296,10 +315,31 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
         loop = asyncio.get_running_loop()
         result = await asyncio.wait_for(
             loop.run_in_executor(
-                _executor, _engine.execute, payload, deadline_monotonic
+                _executor,
+                partial(
+                    _engine.execute,
+                    payload,
+                    deadline_monotonic,
+                    request_id=request_id,
+                ),
             ),
             timeout=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
         )
+    except RuntimeError as exc:
+        if str(exc) != "request id collision detected":
+            raise
+        collision_result = ScrapeError(
+            url=target_url,
+            error="Request id collision detected",
+            error_category=ErrorCategory.NAVIGATION_ERROR,
+            diagnostics=ScrapeDiagnostics(
+                request_id=request_id,
+                attempts=0,
+                render_ms=0,
+            ),
+        )
+        emit_terminal_telemetry(collision_result, http_status=502)
+        return JSONResponse(status_code=502, content=_json(collision_result))
     except TimeoutError:
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
         timeout_result = ScrapeError(
@@ -307,7 +347,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
             error=f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} seconds",
             error_category=ErrorCategory.TIMEOUT,
             diagnostics=ScrapeDiagnostics(
-                request_id=str(uuid.uuid4()),
+                request_id=request_id,
                 attempts=0,
                 render_ms=render_ms,
             ),

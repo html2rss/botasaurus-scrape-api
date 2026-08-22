@@ -412,12 +412,14 @@ class HealthResponse(BaseModel):
     )
 
 
-def validation_error(url: str, message: str) -> ScrapeError:
+def validation_error(
+    url: str, message: str, *, request_id: str | None = None
+) -> ScrapeError:
     return ScrapeError(
         url=url,
         error=message,
         error_category=ErrorCategory.VALIDATION,
-        diagnostics=ScrapeDiagnostics(request_id=str(uuid.uuid4())),
+        diagnostics=ScrapeDiagnostics(request_id=request_id or str(uuid.uuid4())),
     )
 
 

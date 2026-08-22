@@ -789,6 +789,98 @@ class XhrCollectorTests(unittest.TestCase):
         self.assertNotIn("failed-attempt", second[0]["body"])
 
 
+class RequestIdContractTests(unittest.TestCase):
+    INBOUND_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+    def test_honored_request_id_on_200(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main_mod
+        from app.main import app
+
+        def fake_execute(payload, _deadline=None, *, request_id=None):
+            return ScrapeSuccess(
+                url=str(payload.url),
+                html="<html></html>",
+                diagnostics=ScrapeDiagnostics(
+                    request_id=request_id,
+                    attempts=1,
+                    render_ms=1,
+                    execution_tier=ExecutionTier.HTTP_REQUEST,
+                ),
+            )
+
+        with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={"url": "https://example.com"},
+                headers={"X-Request-Id": self.INBOUND_ID},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["diagnostics"]["request_id"], self.INBOUND_ID)
+
+    def test_honored_request_id_on_400(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/scrape",
+            json={"url": "https://this-host-does-not-exist-12345.invalid/"},
+            headers={"X-Request-Id": self.INBOUND_ID},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        body = response.json()
+        self.assertEqual(body["diagnostics"]["request_id"], self.INBOUND_ID)
+        self.assertEqual(body["error_category"], "validation")
+
+    def test_honored_request_id_on_422(self):
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.post(
+            "/scrape",
+            json={
+                "url": "https://example.com",
+                "window_size": [1920],
+            },
+            headers={"X-Request-Id": self.INBOUND_ID},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertEqual(body["diagnostics"]["request_id"], self.INBOUND_ID)
+        self.assertEqual(body["error_category"], "validation")
+
+    def test_request_id_collision_returns_502(self):
+        from fastapi.testclient import TestClient
+
+        import app.main as main_mod
+        from app.main import app
+
+        main_mod._engine.register_request_id(self.INBOUND_ID)
+        try:
+            client = TestClient(app)
+            response = client.post(
+                "/scrape",
+                json={"url": "https://example.com"},
+                headers={"X-Request-Id": self.INBOUND_ID},
+            )
+        finally:
+            main_mod._engine.unregister_request_id(self.INBOUND_ID)
+
+        self.assertEqual(response.status_code, 502)
+        body = response.json()
+        self.assertEqual(body["diagnostics"]["request_id"], self.INBOUND_ID)
+        self.assertEqual(body["error_category"], "navigation_error")
+
+
 class SchemaValidationHttpTests(unittest.TestCase):
     def test_schema_422_returns_scrape_envelope(self):
         from fastapi.testclient import TestClient
@@ -827,13 +919,13 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         captured: dict[str, int] = {}
 
-        def fake_execute(payload, _deadline=None):
+        def fake_execute(payload, _deadline=None, *, request_id=None):
             captured["wait"] = payload.wait_timeout_seconds
             return ScrapeSuccess(
                 url=str(payload.url),
                 html="<html></html>",
                 diagnostics=ScrapeDiagnostics(
-                    request_id="req-wait-clamp",
+                    request_id=request_id or "req-wait-clamp",
                     attempts=1,
                     render_ms=1,
                     execution_tier=ExecutionTier.HTTP_REQUEST,
@@ -876,6 +968,15 @@ class OpenApiContractTests(unittest.TestCase):
         from app.main import app
 
         cls.schema = app.openapi()
+
+    def test_scrape_documents_x_request_id_header(self):
+        scrape = self.schema["paths"]["/scrape"]["post"]
+        parameters = scrape.get("parameters") or []
+        header_params = {
+            param["name"]: param for param in parameters if param.get("in") == "header"
+        }
+        self.assertIn("X-Request-Id", header_params)
+        self.assertFalse(header_params["X-Request-Id"].get("required", True))
 
     def test_documents_health_and_scrape_paths(self):
         paths = self.schema["paths"]
