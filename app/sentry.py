@@ -32,7 +32,6 @@ def _parse_bool(value: str | None, default: bool = False) -> bool:
 
 
 def is_sentry_enabled() -> bool:
-    """Return True if SENTRY_DSN is configured and non-empty."""
     return bool(os.getenv("SENTRY_DSN", "").strip())
 
 
@@ -49,19 +48,7 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] 
 
 
 def setup_sentry() -> bool:
-    """Initialize the Sentry SDK if SENTRY_DSN is configured.
-
-    Reads configuration from environment variables:
-    - SENTRY_DSN: Required project DSN. If absent/empty, Sentry is not initialized.
-    - SENTRY_ENVIRONMENT / ENVIRONMENT: Deployment environment (default: 'production').
-    - SENTRY_RELEASE: Optional release identifier.
-    - SENTRY_TRACES_SAMPLE_RATE: APM traces sample rate in [0.0, 1.0] (default: 0.0).
-    - SENTRY_PROFILES_SAMPLE_RATE: Profiling sample rate in [0.0, 1.0] (default: 0.0).
-    - SENTRY_SEND_DEFAULT_PII: Whether to send default PII (default: False).
-
-    Returns:
-        bool: True if Sentry was initialized, False otherwise.
-    """
+    """Initialize Sentry when SENTRY_DSN is set. Returns True on success."""
     global _INITIALIZED
 
     dsn = os.getenv("SENTRY_DSN", "").strip()
@@ -116,7 +103,6 @@ def setup_sentry() -> bool:
 
 
 def flush_sentry(timeout: float = 2.0) -> None:
-    """Flush queued Sentry events on application shutdown."""
     if not _INITIALIZED:
         return
     try:
