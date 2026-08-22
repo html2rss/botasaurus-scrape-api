@@ -8,7 +8,7 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
   - `GET /health`
   - `POST /scrape`
 - Intended usage: run and test through Docker only.
-- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `20`).
+- Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with per-request total and post-boot work timeouts (`SCRAPE_TIMEOUT_SECONDS`, default `45`; `SCRAPE_WORK_TIMEOUT_SECONDS`, default `30`).
 - On-demand isolation-first runtime: every scrape request runs with an ephemeral browser profile and request-scoped runtime dir, then gets fully cleaned up.
 - Optional Sentry ops telemetry when `SENTRY_DSN` is set (see [Sentry](#sentry-optional)).
 
@@ -179,7 +179,7 @@ Request options (contract):
   - `organic_get`: only `organic_get`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
-- `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_TIMEOUT_SECONDS]` (default `20`) are clamped into that range so scrape still runs.
+- `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_WORK_TIMEOUT_SECONDS]` (default `30`) are clamped into that range so scrape still runs.
 - `scroll`: if true, scrolls to the bottom to trigger lazy-loaded feeds (routes to browser tier).
 - `block_images`: pass image blocking to driver. Default `true`.
 - `block_images_and_css`: pass image+css blocking to driver. Default `false`.
@@ -332,7 +332,8 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | Variable | Default | Description |
 | :--- | :--- | :--- |
 | `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. |
-| `SCRAPE_TIMEOUT_SECONDS` | `20` | Maximum scrape runtime timeout in seconds. |
+| `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
+| `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
 
 ## Example Calls
 

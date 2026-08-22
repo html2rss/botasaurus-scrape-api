@@ -129,6 +129,19 @@ class SentryIntegrationTests(unittest.TestCase):
         kept = _before_send({"tags": {"error_category": "navigation_error"}}, {})
         self.assertEqual(kept["tags"]["error_category"], "navigation_error")
 
+    def test_before_send_drops_websocket_teardown(self):
+        dropped = _before_send(
+            {
+                "logger": "websocket",
+                "logentry": {"formatted": "Connection to remote host was lost"},
+            },
+            {},
+        )
+        self.assertIsNone(dropped)
+
+        kept = _before_send({"logger": "botasaurus_scrape_api"}, {})
+        self.assertIsNotNone(kept)
+
     def test_setup_sentry_clamps_sample_rates_and_handles_invalid_floats(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
         # Invalid string falls back to 0.0

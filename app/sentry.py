@@ -44,6 +44,17 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] 
     tags = event.get("tags") or {}
     if tags.get("error_category") == "challenge_block":
         return None
+
+    log_record = hint.get("log_record")
+    logger_name = event.get("logger")
+    if logger_name == "websocket" or getattr(log_record, "name", None) == "websocket":
+        return None
+
+    logentry = event.get("logentry") or {}
+    message = logentry.get("formatted") or event.get("message") or ""
+    if "Connection to remote host was lost" in str(message):
+        return None
+
     return event
 
 

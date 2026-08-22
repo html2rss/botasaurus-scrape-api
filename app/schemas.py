@@ -16,8 +16,16 @@ from pydantic import (
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
-DEFAULT_SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "20"))
-DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+DEFAULT_SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "45"))
+DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS = int(
+    os.getenv("SCRAPE_WORK_TIMEOUT_SECONDS", "30")
+)
+if DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS > DEFAULT_SCRAPE_TIMEOUT_SECONDS:
+    raise ValueError(
+        "SCRAPE_WORK_TIMEOUT_SECONDS cannot exceed SCRAPE_TIMEOUT_SECONDS: "
+        f"work={DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS} total={DEFAULT_SCRAPE_TIMEOUT_SECONDS}"
+    )
+DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS)
 
 
 class ExecutionMode(StrEnum):
@@ -171,7 +179,7 @@ class ScrapeRequest(BaseModel):
         default=DEFAULT_WAIT_TIMEOUT_SECONDS,
         description=(
             "Selector wait timeout in seconds. Values outside "
-            f"[1, {DEFAULT_SCRAPE_TIMEOUT_SECONDS}] are clamped into that "
+            f"[1, {DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS}] are clamped into that "
             "range so scrape still runs; they are not rejected with 422."
         ),
         examples=[15],
@@ -275,7 +283,7 @@ class ScrapeRequest(BaseModel):
         except (TypeError, ValueError):  # fmt: skip
             return value
 
-        clamped = max(1, min(numeric, DEFAULT_SCRAPE_TIMEOUT_SECONDS))
+        clamped = max(1, min(numeric, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS))
         if clamped != numeric:
             url = info.data.get("url")
             logger.info(
