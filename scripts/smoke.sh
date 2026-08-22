@@ -8,8 +8,10 @@ CONTAINER_PORT=4010
 BASE_URL="http://127.0.0.1:${HOST_PORT}"
 
 cleanup() {
-  docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+  docker rm -f "${CONTAINER_NAME}" "${CONTAINER_NAME}-sentry" >/dev/null 2>&1 || true
 }
+
+
 
 fail() {
   echo "[smoke] ERROR: $*" >&2
@@ -331,4 +333,16 @@ scroll_code="$(echo "$scroll_response" | tail -n1)"
 [[ "$scroll_code" == "200" ]] || fail "Expected scroll scrape 200, got ${scroll_code}"
 assert_json_key_equals "$scroll_body" "diagnostics.execution_tier" "browser_driver" || fail "Expected execution_tier=browser_driver for scroll"
 
+echo "[smoke] Checking SENTRY_DSN initialization in isolated container"
+SENTRY_CONTAINER="${CONTAINER_NAME}-sentry"
+docker rm -f "${SENTRY_CONTAINER}" >/dev/null 2>&1 || true
+docker run -d --name "${SENTRY_CONTAINER}" -e SENTRY_DSN="https://fake-key@fake.ingest.sentry.io/12345" -e SENTRY_ENVIRONMENT="smoke-test" "${IMAGE_NAME}" >/dev/null
+sleep 2
+sentry_logs="$(docker logs "${SENTRY_CONTAINER}" 2>&1)"
+echo "$sentry_logs" | grep -q "sentry_initialized environment=smoke-test" || fail "Expected sentry_initialized in container logs"
+echo "$sentry_logs" | grep -q "fake-key" && fail "Sentry DSN secret leaked into container logs"
+docker rm -f "${SENTRY_CONTAINER}" >/dev/null 2>&1 || true
+
+
 echo "[smoke] PASS"
+
