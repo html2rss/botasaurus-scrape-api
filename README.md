@@ -10,7 +10,7 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
 - Intended usage: run and test through Docker only.
 - Runtime boundary: async FastAPI handler delegates sync browser work to a bounded threadpool (`SCRAPE_MAX_WORKERS`, default `4`), with a per-request timeout (`SCRAPE_TIMEOUT_SECONDS`, default `20`).
 - On-demand isolation-first runtime: every scrape request runs with an ephemeral browser profile and request-scoped runtime dir, then gets fully cleaned up.
-- Optional Sentry integration: automatic error tracking and APM when `SENTRY_DSN` is provided in the environment.
+- Optional Sentry ops telemetry when `SENTRY_DSN` is set (see [Sentry](#sentry-optional)).
 
 ## Prerequisites
 
@@ -24,15 +24,6 @@ Run directly with Docker:
 
 ```bash
 docker run --rm -p 4010:4010 html2rss/botasaurus-scrape-api:latest
-```
-
-With optional Sentry error tracking enabled:
-
-```bash
-docker run --rm -p 4010:4010 \
-  -e SENTRY_DSN="https://key@o123.ingest.sentry.io/456" \
-  -e SENTRY_ENVIRONMENT="production" \
-  html2rss/botasaurus-scrape-api:latest
 ```
 
 Or run from this repository directory:
@@ -55,9 +46,7 @@ make scrape-example
 
 ## Docker Compose
 
-Use a **separate Sentry project** for this service. Do not reuse the html2rss-web
-`SENTRY_DSN` — scraper operational events belong in their own project
-(`BOTASAURUS_SENTRY_DSN`).
+Use a dedicated Sentry project — map `BOTASAURUS_SENTRY_DSN` to `SENTRY_DSN`; do not reuse the html2rss-web DSN.
 
 ```yaml
 services:
@@ -71,8 +60,6 @@ services:
       SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
       SENTRY_RELEASE: ${GIT_SHA:-unknown}
 ```
-
-
 
 ## Published Image
 
@@ -325,15 +312,24 @@ Exception:
 
 ## Environment Variables
 
+### Sentry (optional)
+
+Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` → `SENTRY_DSN`). Disabled when `SENTRY_DSN` is unset.
+
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SENTRY_DSN` | _(unset)_ | Optional Sentry DSN for automatic error tracking and APM. Sentry is disabled when unset or empty. |
-| `SENTRY_ENVIRONMENT` | `production` | Deployment environment tag (falls back to `ENVIRONMENT` if unset). |
-| `SENTRY_RELEASE` | _(unset)_ | Optional release version tag attached to Sentry events. |
-| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | Sentry APM trace sample rate between `0.0` and `1.0`. |
-| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Sentry profiling sample rate between `0.0` and `1.0`. |
-| `SENTRY_SEND_DEFAULT_PII` | `false` | When `true`, enables transmission of default PII to Sentry. |
-| `SCRAPE_MAX_WORKERS` | `4` | Concurrency threadpool worker limit for sync browser execution. |
+| `SENTRY_DSN` | _(unset)_ | Project DSN. |
+| `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`ENVIRONMENT` fallback). |
+| `SENTRY_RELEASE` | _(unset)_ | Release tag on events. |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (off by default; enable later if needed). |
+| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate. |
+| `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true`. |
+
+**Signal routing:** `navigation_error` and `timeout` → grouped Sentry Issues. `challenge_block` → `scrape.challenge_block` metric only; engine stdout keeps the detailed log line. Traces stay off unless you raise `SENTRY_TRACES_SAMPLE_RATE`.
+
+| Variable | Default | Description |
+| :--- | :--- | :--- |
+| `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. |
 | `SCRAPE_TIMEOUT_SECONDS` | `20` | Maximum scrape runtime timeout in seconds. |
 
 ## Example Calls
