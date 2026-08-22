@@ -55,6 +55,10 @@ make scrape-example
 
 ## Docker Compose
 
+Use a **separate Sentry project** for this service. Do not reuse the html2rss-web
+`SENTRY_DSN` — scraper operational events belong in their own project
+(`BOTASAURUS_SENTRY_DSN`).
+
 ```yaml
 services:
   botasaurus:
@@ -63,8 +67,9 @@ services:
     ports:
       - "127.0.0.1:4010:4010"
     environment:
-      SENTRY_DSN: ${BOTASAURUS_SENTRY_DSN:-${SENTRY_DSN:-}}
+      SENTRY_DSN: ${BOTASAURUS_SENTRY_DSN:-}
       SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
+      SENTRY_RELEASE: ${GIT_SHA:-unknown}
 ```
 
 

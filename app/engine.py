@@ -15,6 +15,7 @@ from botasaurus.request import Request
 
 from app.detector import ChallengeAssessment, ChallengeDetector
 from app.metadata import MetadataExtractor
+from app.ops_telemetry import record_challenge_block, report_terminal_outcome
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ChallengeSignal,
@@ -168,6 +169,37 @@ def _error(
             assessment=assessment,
         ),
     )
+
+
+def _terminal_error(
+    url: str,
+    message: str,
+    *,
+    request_id: str,
+    error_category: ErrorCategory,
+    attempts: int = 0,
+    strategy_used: NavigationMode | None = None,
+    render_ms: int = 0,
+    execution_tier: ExecutionTier | None = None,
+    assessment: ChallengeAssessment | None = None,
+    http_status: int = 502,
+) -> ScrapeError:
+    result = _error(
+        url,
+        message,
+        request_id=request_id,
+        error_category=error_category,
+        attempts=attempts,
+        strategy_used=strategy_used,
+        render_ms=render_ms,
+        execution_tier=execution_tier,
+        assessment=assessment,
+    )
+    if error_category == ErrorCategory.CHALLENGE_BLOCK:
+        record_challenge_block(result)
+    else:
+        report_terminal_outcome(result, http_status=http_status)
+    return result
 
 
 class ScrapeSession:
@@ -431,7 +463,7 @@ class ScraperEngine:
                 return None
 
             if assessment.blocked_detected:
-                return _error(
+                return _terminal_error(
                     target_url,
                     "Challenge block detected",
                     request_id=request_id,
@@ -558,7 +590,7 @@ class ScraperEngine:
                         continue
 
                     render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                    return _error(
+                    return _terminal_error(
                         target_url,
                         f"Bot challenge detected ({assessment.detected_marker or 'unknown'})",
                         request_id=request_id,
@@ -606,7 +638,7 @@ class ScraperEngine:
                     if "timeout" in str(exc).lower()
                     else ErrorCategory.NAVIGATION_ERROR
                 )
-                return _error(
+                return _terminal_error(
                     target_url,
                     str(exc),
                     request_id=request_id,
@@ -618,7 +650,7 @@ class ScraperEngine:
                 )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-        return _error(
+        return _terminal_error(
             target_url,
             "Scrape failed after all strategy attempts",
             request_id=request_id,
@@ -637,7 +669,7 @@ class ScraperEngine:
         started_monotonic = time.monotonic()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
-            return _error(
+            return _terminal_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",
                 request_id=request_id,
@@ -671,7 +703,7 @@ class ScraperEngine:
                     )
                     if payload.execution_mode == ExecutionMode.REQUEST:
                         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                        return _error(
+                        return _terminal_error(
                             target_url,
                             str(exc),
                             request_id=request_id,

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import app.sentry as sentry_mod
-from app.sentry import flush_sentry, is_sentry_enabled, setup_sentry
+from app.sentry import _before_send, flush_sentry, is_sentry_enabled, setup_sentry
 
 
 class SentryIntegrationTests(unittest.TestCase):
@@ -59,12 +59,19 @@ class SentryIntegrationTests(unittest.TestCase):
 
             self.assertTrue(result)
             self.assertTrue(sentry_mod._INITIALIZED)
-            mock_init.assert_called_once_with(
-                dsn=dsn,
-                environment="production",
-                traces_sample_rate=0.0,
-                send_default_pii=False,
-            )
+            mock_init.assert_called_once()
+            init_kwargs = mock_init.call_args.kwargs
+            self.assertEqual(init_kwargs["dsn"], dsn)
+            self.assertEqual(init_kwargs["environment"], "production")
+            self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
+            self.assertFalse(init_kwargs["send_default_pii"])
+            self.assertIs(init_kwargs["before_send"], _before_send)
+            integration_names = [
+                type(integration).__name__
+                for integration in init_kwargs["integrations"]
+            ]
+            self.assertIn("FastApiIntegration", integration_names)
+            self.assertIn("StarletteIntegration", integration_names)
 
             log_output = "\n".join(captured.output)
             self.assertIn("sentry_initialized", log_output)
@@ -88,14 +95,22 @@ class SentryIntegrationTests(unittest.TestCase):
             result = setup_sentry()
 
             self.assertTrue(result)
-            mock_init.assert_called_once_with(
-                dsn=dsn,
-                environment="staging",
-                release="v2.0.0+abc1234",
-                traces_sample_rate=0.25,
-                profiles_sample_rate=0.10,
-                send_default_pii=True,
-            )
+            mock_init.assert_called_once()
+            init_kwargs = mock_init.call_args.kwargs
+            self.assertEqual(init_kwargs["dsn"], dsn)
+            self.assertEqual(init_kwargs["environment"], "staging")
+            self.assertEqual(init_kwargs["release"], "v2.0.0+abc1234")
+            self.assertEqual(init_kwargs["traces_sample_rate"], 0.25)
+            self.assertEqual(init_kwargs["profiles_sample_rate"], 0.10)
+            self.assertTrue(init_kwargs["send_default_pii"])
+            self.assertIs(init_kwargs["before_send"], _before_send)
+
+    def test_before_send_drops_challenge_block_issues(self):
+        dropped = _before_send({"tags": {"error_category": "challenge_block"}}, {})
+        self.assertIsNone(dropped)
+
+        kept = _before_send({"tags": {"error_category": "navigation_error"}}, {})
+        self.assertEqual(kept["tags"]["error_category"], "navigation_error")
 
     def test_setup_sentry_clamps_sample_rates_and_handles_invalid_floats(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
@@ -110,12 +125,9 @@ class SentryIntegrationTests(unittest.TestCase):
         ):
             result = setup_sentry()
             self.assertTrue(result)
-            mock_init.assert_called_once_with(
-                dsn=dsn,
-                environment="production",
-                traces_sample_rate=0.0,
-                send_default_pii=False,
-            )
+            mock_init.assert_called_once()
+            init_kwargs = mock_init.call_args.kwargs
+            self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
 
         # > 1.0 is clamped to 1.0
         sentry_mod._INITIALIZED = False
@@ -129,12 +141,9 @@ class SentryIntegrationTests(unittest.TestCase):
         ):
             result = setup_sentry()
             self.assertTrue(result)
-            mock_init.assert_called_once_with(
-                dsn=dsn,
-                environment="production",
-                traces_sample_rate=1.0,
-                send_default_pii=False,
-            )
+            mock_init.assert_called_once()
+            init_kwargs = mock_init.call_args.kwargs
+            self.assertEqual(init_kwargs["traces_sample_rate"], 1.0)
 
     def test_flush_sentry_noop_when_not_initialized(self):
         with patch("sentry_sdk.flush") as mock_flush:

@@ -18,6 +18,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.engine import DEFAULT_SCRAPE_TIMEOUT_SECONDS, ScraperEngine
+from app.ops_telemetry import report_terminal_outcome
 from app.schemas import (
     HEALTH_EXAMPLE,
     SCRAPE_ERROR_EXAMPLE,
@@ -317,6 +318,7 @@ async def scrape(payload: ScrapeRequest) -> JSONResponse:
             payload.navigation_mode,
             DEFAULT_SCRAPE_TIMEOUT_SECONDS,
         )
+        report_terminal_outcome(timeout_result, http_status=504)
         return JSONResponse(status_code=504, content=_json(timeout_result))
 
     status_code = 200 if isinstance(result, ScrapeSuccess) else 502
