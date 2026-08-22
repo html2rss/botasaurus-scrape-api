@@ -8,15 +8,18 @@ BASE_URL ?= http://localhost:$(PORT)
 OPENAPI_FILE ?= openapi.yaml
 SPECTRAL_IMAGE ?= stoplight/spectral:6
 
+PYTHON ?= $(shell if [ -f .venv/bin/python3 ]; then echo .venv/bin/python3; else which python3; fi)
+RUFF ?= $(shell if [ -f .venv/bin/ruff ]; then echo .venv/bin/ruff; else which ruff; fi)
+
 lint:
-	ruff check .
-	ruff format --check .
+	$(RUFF) check .
+	$(RUFF) format --check .
 	docker run --rm -i hadolint/hadolint < Dockerfile
 	$(MAKE) spectral
 
 lintfix:
-	ruff check --fix .
-	ruff format .
+	$(RUFF) check --fix .
+	$(RUFF) format .
 
 spectral:
 	docker run --rm -e DO_NOT_TRACK=1 \
@@ -24,12 +27,12 @@ spectral:
 		lint --fail-severity=warn --ruleset /spec/.spectral.yaml /spec/openapi.yaml
 
 openapi:
-	python3 scripts/export_openapi.py --out $(OPENAPI_FILE)
+	$(PYTHON) scripts/export_openapi.py --out $(OPENAPI_FILE)
 
 openapi-verify:
 	@tmp=$$(mktemp); \
 	trap 'rm -f $$tmp' EXIT; \
-	python3 scripts/export_openapi.py --out $$tmp && \
+	$(PYTHON) scripts/export_openapi.py --out $$tmp && \
 	diff -u $(OPENAPI_FILE) $$tmp
 
 check: lint test openapi-verify
@@ -37,7 +40,8 @@ check: lint test openapi-verify
 ready: check
 
 test:
-	python3 -m unittest discover -s tests
+	$(PYTHON) -m unittest discover -s tests
+
 
 build:
 	docker build -t $(IMAGE) .

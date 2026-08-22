@@ -31,10 +31,7 @@ from app.schemas import (
     validation_error,
 )
 from app.security import UrlGuard
-
-_MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
-_executor = ThreadPoolExecutor(max_workers=max(1, _MAX_WORKERS))
-_engine = ScraperEngine()
+from app.sentry import flush_sentry, setup_sentry
 
 logger = logging.getLogger("botasaurus_scrape_api")
 if not logger.handlers:
@@ -43,11 +40,18 @@ if not logger.handlers:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
+setup_sentry()
+
+_MAX_WORKERS = int(os.getenv("SCRAPE_MAX_WORKERS", "4"))
+_executor = ThreadPoolExecutor(max_workers=max(1, _MAX_WORKERS))
+_engine = ScraperEngine()
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncGenerator[None]:
     yield
     _executor.shutdown(wait=False, cancel_futures=True)
+    flush_sentry()
 
 
 _API_DESCRIPTION = f"""
