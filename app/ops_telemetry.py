@@ -101,7 +101,6 @@ def record_challenge_block(result: ScrapeError) -> None:
 
 
 def emit_terminal_telemetry(result: ScrapeError, *, http_status: int) -> None:
-    """Emit operational telemetry for terminal scrape failures at the HTTP boundary."""
     if result.error_category == ErrorCategory.CHALLENGE_BLOCK:
         record_challenge_block(result)
         return
