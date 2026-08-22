@@ -6,7 +6,13 @@ import unittest
 from unittest.mock import patch
 
 import app.sentry as sentry_mod
-from app.sentry import _before_send, flush_sentry, is_sentry_enabled, setup_sentry
+from app.sentry import (
+    _before_send,
+    flush_sentry,
+    is_sentry_enabled,
+    sentry_is_ready,
+    setup_sentry,
+)
 
 
 class SentryIntegrationTests(unittest.TestCase):
@@ -25,6 +31,17 @@ class SentryIntegrationTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
             self.assertTrue(is_sentry_enabled())
+
+    def test_sentry_is_ready_requires_init(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(sentry_is_ready())
+
+        with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
+            self.assertFalse(sentry_is_ready())
+
+        sentry_mod._INITIALIZED = True
+        with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
+            self.assertTrue(sentry_is_ready())
 
     def test_setup_sentry_noop_when_dsn_absent(self):
         with (

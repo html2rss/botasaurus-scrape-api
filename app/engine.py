@@ -15,7 +15,6 @@ from botasaurus.request import Request
 
 from app.detector import ChallengeAssessment, ChallengeDetector
 from app.metadata import MetadataExtractor
-from app.ops_telemetry import record_challenge_block, report_terminal_outcome
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     ChallengeSignal,
@@ -182,9 +181,8 @@ def _terminal_error(
     render_ms: int = 0,
     execution_tier: ExecutionTier | None = None,
     assessment: ChallengeAssessment | None = None,
-    http_status: int = 502,
 ) -> ScrapeError:
-    result = _error(
+    return _error(
         url,
         message,
         request_id=request_id,
@@ -195,11 +193,6 @@ def _terminal_error(
         execution_tier=execution_tier,
         assessment=assessment,
     )
-    if error_category == ErrorCategory.CHALLENGE_BLOCK:
-        record_challenge_block(result)
-    else:
-        report_terminal_outcome(result, http_status=http_status)
-    return result
 
 
 class ScrapeSession:

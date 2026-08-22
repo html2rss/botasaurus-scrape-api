@@ -1,11 +1,14 @@
 # tests/test_ops_telemetry.py
 from __future__ import annotations
 
-import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from app.ops_telemetry import record_challenge_block, report_terminal_outcome
+from app.ops_telemetry import (
+    emit_terminal_telemetry,
+    record_challenge_block,
+    report_terminal_outcome,
+)
 from app.schemas import (
     ErrorCategory,
     ExecutionTier,
@@ -39,10 +42,10 @@ def _scrape_error(
 
 
 class OpsTelemetryTests(unittest.TestCase):
-    def test_report_terminal_outcome_noop_when_sentry_disabled(self):
+    def test_report_terminal_outcome_noop_when_sentry_not_ready(self):
         result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
         with (
-            patch.dict(os.environ, {}, clear=True),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=False),
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
             report_terminal_outcome(result, http_status=502)
@@ -52,11 +55,7 @@ class OpsTelemetryTests(unittest.TestCase):
         result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
         mock_scope = MagicMock()
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": "https://key@o123.ingest.sentry.io/456"},
-                clear=True,
-            ),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
             patch("sentry_sdk.new_scope") as mock_new_scope,
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
@@ -72,18 +71,17 @@ class OpsTelemetryTests(unittest.TestCase):
                 ["botasaurus-scrape-api", "navigation_error", "example.com"],
             )
             mock_scope.set_tag.assert_any_call("host", "example.com")
-            mock_scope.set_tag.assert_any_call("request_id", "req-123")
+            mock_scope.set_context.assert_called_once_with(
+                "scrape",
+                {"request_id": "req-123", "attempts": 2},
+            )
             mock_scope.set_tag.assert_any_call("http_status", "502")
 
     def test_report_terminal_outcome_emits_p0_timeout(self):
         result = _scrape_error(category=ErrorCategory.TIMEOUT)
         mock_scope = MagicMock()
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": "https://key@o123.ingest.sentry.io/456"},
-                clear=True,
-            ),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
             patch("sentry_sdk.new_scope") as mock_new_scope,
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
@@ -100,11 +98,7 @@ class OpsTelemetryTests(unittest.TestCase):
     def test_report_terminal_outcome_skips_challenge_block(self):
         result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": "https://key@o123.ingest.sentry.io/456"},
-                clear=True,
-            ),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
             report_terminal_outcome(result, http_status=502)
@@ -117,11 +111,7 @@ class OpsTelemetryTests(unittest.TestCase):
             execution_tier=ExecutionTier.BROWSER_DRIVER,
         )
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": "https://key@o123.ingest.sentry.io/456"},
-                clear=True,
-            ),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
             patch("sentry_sdk.metrics.count") as mock_count,
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
@@ -138,10 +128,10 @@ class OpsTelemetryTests(unittest.TestCase):
             )
             mock_capture.assert_not_called()
 
-    def test_record_challenge_block_noop_when_sentry_disabled(self):
+    def test_record_challenge_block_noop_when_sentry_not_ready(self):
         result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)
         with (
-            patch.dict(os.environ, {}, clear=True),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=False),
             patch("sentry_sdk.metrics.count") as mock_count,
         ):
             record_challenge_block(result)
@@ -150,15 +140,31 @@ class OpsTelemetryTests(unittest.TestCase):
     def test_record_challenge_block_skips_non_challenge_categories(self):
         result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": "https://key@o123.ingest.sentry.io/456"},
-                clear=True,
-            ),
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
             patch("sentry_sdk.metrics.count") as mock_count,
         ):
             record_challenge_block(result)
             mock_count.assert_not_called()
+
+    def test_emit_terminal_telemetry_routes_challenge_block_to_metric(self):
+        result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)
+        with (
+            patch("app.ops_telemetry.record_challenge_block") as mock_metric,
+            patch("app.ops_telemetry.report_terminal_outcome") as mock_issue,
+        ):
+            emit_terminal_telemetry(result, http_status=502)
+            mock_metric.assert_called_once_with(result)
+            mock_issue.assert_not_called()
+
+    def test_emit_terminal_telemetry_routes_p0_errors_to_issues(self):
+        result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
+        with (
+            patch("app.ops_telemetry.record_challenge_block") as mock_metric,
+            patch("app.ops_telemetry.report_terminal_outcome") as mock_issue,
+        ):
+            emit_terminal_telemetry(result, http_status=502)
+            mock_issue.assert_called_once_with(result, http_status=502)
+            mock_metric.assert_not_called()
 
 
 if __name__ == "__main__":

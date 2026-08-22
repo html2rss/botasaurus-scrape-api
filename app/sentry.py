@@ -36,6 +36,11 @@ def is_sentry_enabled() -> bool:
     return bool(os.getenv("SENTRY_DSN", "").strip())
 
 
+def sentry_is_ready() -> bool:
+    """Return True when Sentry DSN is set and init succeeded."""
+    return is_sentry_enabled() and _INITIALIZED
+
+
 def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
     tags = event.get("tags") or {}
     if tags.get("error_category") == "challenge_block":
