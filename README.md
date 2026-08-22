@@ -125,6 +125,8 @@ Example shape:
 
 ### `POST /scrape`
 
+Optional transport header `X-Request-Id`: when present and path-safe, the same value is echoed in `diagnostics.request_id` on every response envelope (success and error).
+
 Request body (minimum):
 
 ```json

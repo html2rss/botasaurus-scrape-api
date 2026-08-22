@@ -655,21 +655,25 @@ class ScraperEngine:
         )
 
     def execute(
-        self, payload: ScrapeRequest, deadline_monotonic: float | None = None
+        self,
+        payload: ScrapeRequest,
+        deadline_monotonic: float | None = None,
+        *,
+        request_id: str | None = None,
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
-        request_id = str(uuid.uuid4())
+        resolved_request_id = request_id or str(uuid.uuid4())
         started_monotonic = time.monotonic()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
             return _terminal_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",
-                request_id=request_id,
+                request_id=resolved_request_id,
                 error_category=ErrorCategory.TIMEOUT,
             )
 
-        with ScrapeSession(self, request_id) as session:
+        with ScrapeSession(self, resolved_request_id) as session:
             should_try_request_tier = (
                 payload.execution_mode == ExecutionMode.REQUEST
                 or (
@@ -683,14 +687,14 @@ class ScraperEngine:
             if should_try_request_tier:
                 try:
                     request_result = self.run_request_tier(
-                        payload, request_id, started_monotonic
+                        payload, resolved_request_id, started_monotonic
                     )
                     if request_result is not None:
                         return request_result
                 except Exception as exc:
                     logger.info(
                         "request_tier_failed request_id=%s host=%s error=%s",
-                        request_id,
+                        resolved_request_id,
                         urlparse(target_url).hostname,
                         str(exc),
                     )
@@ -699,7 +703,7 @@ class ScraperEngine:
                         return _terminal_error(
                             target_url,
                             str(exc),
-                            request_id=request_id,
+                            request_id=resolved_request_id,
                             attempts=1,
                             render_ms=render_ms,
                             error_category=ErrorCategory.NAVIGATION_ERROR,
