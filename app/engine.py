@@ -170,6 +170,31 @@ def _error(
     )
 
 
+def _terminal_error(
+    url: str,
+    message: str,
+    *,
+    request_id: str,
+    error_category: ErrorCategory,
+    attempts: int = 0,
+    strategy_used: NavigationMode | None = None,
+    render_ms: int = 0,
+    execution_tier: ExecutionTier | None = None,
+    assessment: ChallengeAssessment | None = None,
+) -> ScrapeError:
+    return _error(
+        url,
+        message,
+        request_id=request_id,
+        error_category=error_category,
+        attempts=attempts,
+        strategy_used=strategy_used,
+        render_ms=render_ms,
+        execution_tier=execution_tier,
+        assessment=assessment,
+    )
+
+
 class ScrapeSession:
     """Encapsulates per-request concurrency registration and filesystem isolation."""
 
@@ -431,7 +456,7 @@ class ScraperEngine:
                 return None
 
             if assessment.blocked_detected:
-                return _error(
+                return _terminal_error(
                     target_url,
                     "Challenge block detected",
                     request_id=request_id,
@@ -558,7 +583,7 @@ class ScraperEngine:
                         continue
 
                     render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                    return _error(
+                    return _terminal_error(
                         target_url,
                         f"Bot challenge detected ({assessment.detected_marker or 'unknown'})",
                         request_id=request_id,
@@ -606,7 +631,7 @@ class ScraperEngine:
                     if "timeout" in str(exc).lower()
                     else ErrorCategory.NAVIGATION_ERROR
                 )
-                return _error(
+                return _terminal_error(
                     target_url,
                     str(exc),
                     request_id=request_id,
@@ -618,7 +643,7 @@ class ScraperEngine:
                 )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-        return _error(
+        return _terminal_error(
             target_url,
             "Scrape failed after all strategy attempts",
             request_id=request_id,
@@ -637,7 +662,7 @@ class ScraperEngine:
         started_monotonic = time.monotonic()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
-            return _error(
+            return _terminal_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",
                 request_id=request_id,
@@ -671,7 +696,7 @@ class ScraperEngine:
                     )
                     if payload.execution_mode == ExecutionMode.REQUEST:
                         render_ms = int((time.monotonic() - started_monotonic) * 1000)
-                        return _error(
+                        return _terminal_error(
                             target_url,
                             str(exc),
                             request_id=request_id,

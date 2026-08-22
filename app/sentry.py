@@ -36,6 +36,18 @@ def is_sentry_enabled() -> bool:
     return bool(os.getenv("SENTRY_DSN", "").strip())
 
 
+def sentry_is_ready() -> bool:
+    """Return True when Sentry DSN is set and init succeeded."""
+    return is_sentry_enabled() and _INITIALIZED
+
+
+def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+    tags = event.get("tags") or {}
+    if tags.get("error_category") == "challenge_block":
+        return None
+    return event
+
+
 def setup_sentry() -> bool:
     """Initialize the Sentry SDK if SENTRY_DSN is configured.
 
@@ -58,6 +70,8 @@ def setup_sentry() -> bool:
 
     try:
         import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
     except ImportError:
         logger.warning(
             "sentry_sdk_import_failed SENTRY_DSN is set but sentry-sdk package is not available"
@@ -77,6 +91,11 @@ def setup_sentry() -> bool:
         "environment": environment,
         "traces_sample_rate": traces_sample_rate,
         "send_default_pii": send_default_pii,
+        "integrations": [
+            FastApiIntegration(),
+            StarletteIntegration(),
+        ],
+        "before_send": _before_send,
     }
 
     if release:
