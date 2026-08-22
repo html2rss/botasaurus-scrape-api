@@ -20,8 +20,6 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
 
 ## Quick Start (Docker Only)
 
-### Standalone Docker Run
-
 Run directly with Docker:
 
 ```bash
@@ -57,36 +55,8 @@ make scrape-example
 
 ## Docker Compose
 
-### Standalone Service
-
 ```yaml
 services:
-  botasaurus:
-    image: html2rss/botasaurus-scrape-api:latest
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:4010:4010"
-    environment:
-      SENTRY_DSN: ${SENTRY_DSN:-}
-      SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
-```
-
-### Full Stack with html2rss-web
-
-```yaml
-services:
-  html2rss-web:
-    image: html2rss/web:1
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:4000:4000"
-    environment:
-      RACK_ENV: production
-      HTML2RSS_SECRET_KEY: ${HTML2RSS_SECRET_KEY:?set HTML2RSS_SECRET_KEY}
-      HTML2RSS_ACCESS_TOKEN: ${HTML2RSS_ACCESS_TOKEN:?set HTML2RSS_ACCESS_TOKEN}
-      BOTASAURUS_SCRAPER_URL: http://botasaurus:4010
-      SENTRY_DSN: ${SENTRY_DSN:-}
-
   botasaurus:
     image: html2rss/botasaurus-scrape-api:latest
     restart: unless-stopped
@@ -96,6 +66,7 @@ services:
       SENTRY_DSN: ${BOTASAURUS_SENTRY_DSN:-${SENTRY_DSN:-}}
       SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
 ```
+
 
 
 ## Published Image
