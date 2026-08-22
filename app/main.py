@@ -21,6 +21,7 @@ from app.engine import DEFAULT_SCRAPE_TIMEOUT_SECONDS, ScraperEngine
 from app.ops_telemetry import emit_terminal_telemetry
 from app.request_id import resolve_request_id
 from app.schemas import (
+    DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
     HEALTH_EXAMPLE,
     SCRAPE_ERROR_EXAMPLE,
     SCRAPE_SUCCESS_EXAMPLE,
@@ -62,7 +63,7 @@ Docker-first scrape API that uses Botasaurus to fetch rendered HTML.
 - `GET /health` — liveness and detected Botasaurus version
 - `POST /scrape` — scrape a public `http`/`https` URL
 
-`wait_timeout_seconds` values outside `[1, {DEFAULT_SCRAPE_TIMEOUT_SECONDS}]`
+`wait_timeout_seconds` values outside `[1, {DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS}]`
 are **clamped** into that range so scrape still runs; they are not rejected
 with 422.
 

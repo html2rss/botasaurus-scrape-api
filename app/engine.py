@@ -17,6 +17,7 @@ from app.detector import ChallengeAssessment, ChallengeDetector
 from app.metadata import MetadataExtractor
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
     ChallengeSignal,
     ErrorCategory,
     ExecutionMode,
@@ -31,6 +32,33 @@ from app.schemas import (
 from app.xhr_collector import XhrCollector
 
 logger = logging.getLogger("botasaurus_scrape_api")
+
+
+def _remaining_total_seconds(started_monotonic: float) -> int:
+    return max(
+        1,
+        int(DEFAULT_SCRAPE_TIMEOUT_SECONDS - (time.monotonic() - started_monotonic)),
+    )
+
+
+def _remaining_work_seconds(browser_ready_monotonic: float) -> int:
+    return max(
+        1,
+        int(
+            DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS
+            - (time.monotonic() - browser_ready_monotonic)
+        ),
+    )
+
+
+def _browser_step_budget_seconds(
+    started_monotonic: float, browser_ready_monotonic: float
+) -> int:
+    return min(
+        _remaining_total_seconds(started_monotonic),
+        _remaining_work_seconds(browser_ready_monotonic),
+    )
+
 
 _RUNTIME_ROOT = Path("/tmp/scrape")
 
@@ -399,12 +427,7 @@ class ScraperEngine:
         started_monotonic: float,
     ) -> ScrapeSuccess | ScrapeError | None:
         target_url = str(payload.url)
-        remaining_budget = max(
-            1,
-            int(
-                DEFAULT_SCRAPE_TIMEOUT_SECONDS - (time.monotonic() - started_monotonic)
-            ),
-        )
+        remaining_budget = _remaining_total_seconds(started_monotonic)
 
         req_headers = dict(payload.headers) if payload.headers else {}
         proxies = (
@@ -522,22 +545,19 @@ class ScraperEngine:
             remove_default_browser_check_argument=True,
         )
         self._configure_driver(session.driver, payload, target_url, collector=collector)
+        browser_ready_monotonic = time.monotonic()
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
             try:
-                remaining_budget = max(
-                    1,
-                    int(
-                        DEFAULT_SCRAPE_TIMEOUT_SECONDS
-                        - (time.monotonic() - started_monotonic)
-                    ),
+                step_budget = _browser_step_budget_seconds(
+                    started_monotonic, browser_ready_monotonic
                 )
-                self.navigate(session.driver, target_url, strategy, remaining_budget)
+                self.navigate(session.driver, target_url, strategy, step_budget)
                 self.wait_for_readiness(
                     session.driver,
                     selector=payload.wait_for_selector,
-                    timeout_seconds=min(payload.wait_timeout_seconds, remaining_budget),
+                    timeout_seconds=min(payload.wait_timeout_seconds, step_budget),
                 )
 
                 if payload.scroll:

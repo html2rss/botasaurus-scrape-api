@@ -16,6 +16,7 @@ from app.engine import (
 from app.metadata import MetadataExtractor
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+    DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
     ErrorCategory,
     ExecutionMode,
     ExecutionTier,
@@ -141,17 +142,20 @@ class MainUnitTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             ScrapeRequest(url="https://example.com", window_size={"width": 1920})
 
-    def test_wait_timeout_seconds_clamps_gem_default_to_service_cap(self):
+    def test_wait_timeout_seconds_clamps_above_work_cap(self):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
-            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=28)
+            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=35)
 
-        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
-        self.assertEqual(DEFAULT_SCRAPE_TIMEOUT_SECONDS, 20)
+        self.assertEqual(
+            payload.wait_timeout_seconds, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS
+        )
+        self.assertEqual(DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS, 30)
+        self.assertEqual(DEFAULT_SCRAPE_TIMEOUT_SECONDS, 45)
         log_text = "\n".join(captured.output)
         self.assertIn("host=example.com", log_text)
         self.assertIn("field=wait_timeout_seconds", log_text)
-        self.assertIn("from=28", log_text)
-        self.assertIn("to=20", log_text)
+        self.assertIn("from=35", log_text)
+        self.assertIn("to=30", log_text)
 
     def test_wait_timeout_seconds_clamps_below_one(self):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
@@ -169,9 +173,11 @@ class MainUnitTests(unittest.TestCase):
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
-            wait_timeout_seconds=28,
+            wait_timeout_seconds=35,
         )
-        self.assertEqual(payload.wait_timeout_seconds, DEFAULT_SCRAPE_TIMEOUT_SECONDS)
+        self.assertEqual(
+            payload.wait_timeout_seconds, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS
+        )
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(runtime_root=Path(tmp))
@@ -479,6 +485,40 @@ class MetadataExtractorUnitTests(unittest.TestCase):
 
 
 class ScraperEngineUnitTests(unittest.TestCase):
+    def test_browser_tier_step_budget_is_boot_aware(self):
+        captured: dict[str, int | None] = {"navigate_timeout": None}
+
+        class _NavigateCaptureDriver(_FakeDriver):
+            def get(self, *_args, **kwargs):
+                captured["navigate_timeout"] = kwargs.get("timeout")
+                return None
+
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+
+        monotonic_values = [
+            1000.0,  # execute started
+            1020.0,  # browser ready after boot
+            1020.0,  # remaining total
+            1020.0,  # remaining work
+            1020.0,  # render_ms
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with (
+                patch("app.engine.Driver", _NavigateCaptureDriver),
+                patch("app.engine.time.monotonic", side_effect=monotonic_values),
+            ):
+                result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertEqual(captured["navigate_timeout"], 25)
+
     def test_request_id_collision_raises(self):
         engine = ScraperEngine()
         engine.register_request_id("req-123")
@@ -938,14 +978,14 @@ class SchemaValidationHttpTests(unittest.TestCase):
                 "/scrape",
                 json={
                     "url": "https://example.com",
-                    "wait_timeout_seconds": 28,
+                    "wait_timeout_seconds": 35,
                 },
             )
 
         self.assertNotEqual(response.status_code, 422)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured["wait"], DEFAULT_SCRAPE_TIMEOUT_SECONDS)
-        self.assertEqual(captured["wait"], 20)
+        self.assertEqual(captured["wait"], DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS)
+        self.assertEqual(captured["wait"], 30)
 
 
 def _schema_ref_names(node: object) -> set[str]:
