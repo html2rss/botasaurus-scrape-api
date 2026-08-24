@@ -198,6 +198,48 @@ class EngineProgressMarkTests(unittest.TestCase):
             tier=ExecutionTier.HTTP_REQUEST,
         )
 
+    def test_request_tier_timeout_exception_sets_phase(self):
+        class BoomRequest:
+            def get(self, *_a, **_k):
+                raise TimeoutError("HTTP read timeout")
+
+            def close(self):
+                return None
+
+        progress = ScrapeProgress()
+        result = _execute(
+            ScrapeRequest(url=_URL, execution_mode=ExecutionMode.REQUEST),
+            progress=progress,
+            request_id="req-http-timeout",
+            Request=BoomRequest,
+        )
+        self.assertEqual(result.error_category.value, "timeout")
+        self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.WORK)
+        self.assertEqual(result.diagnostics.execution_tier, ExecutionTier.HTTP_REQUEST)
+        self.assertEqual(progress.snapshot().phase, TimeoutPhase.WORK)
+
+    def test_browser_tier_timeout_exception_sets_phase(self):
+        class BoomDriver(_PhaseProbeDriver):
+            def get(self, *_a, **_k):
+                raise TimeoutError("navigation timeout")
+
+        progress = ScrapeProgress()
+        BoomDriver.progress = progress
+        result = _execute(
+            ScrapeRequest(
+                url=_URL,
+                execution_mode=ExecutionMode.BROWSER,
+                navigation_mode=NavigationMode.GET,
+                max_retries=0,
+            ),
+            progress=progress,
+            request_id="req-browser-timeout",
+            Driver=BoomDriver,
+        )
+        self.assertEqual(result.error_category.value, "timeout")
+        self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.WORK)
+        self.assertEqual(result.diagnostics.strategy_used, NavigationMode.GET)
+
 
 class HandlerTimeoutHttpTests(unittest.TestCase):
     def test_scrape_handler_timeout_uses_progress(self):

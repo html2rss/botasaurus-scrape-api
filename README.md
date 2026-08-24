@@ -254,7 +254,7 @@ Field behavior:
 - `diagnostics.timeout_phase`: on `error_category=timeout` only — which stage burned the budget: `queue` (threadpool wait), `boot` (browser/driver start), or `work` (navigate/wait/scroll). `null` on non-timeout outcomes.
 - `xhr_responses`: always-on additive list of JSON XHR/fetch sub-resource bodies captured during the browser tier (empty for HTTP-request tier). Each entry is `{url, status_code, headers, body}`. `headers` keep only `content-type` (Set-Cookie and other headers are dropped). Caps: at most 20 responses, 500 KB per body, 2 MB aggregate across bodies. Main document responses are excluded. Collector state is reset between strategy retries so challenge interstitials do not pollute a later successful attempt. Candidate filtering for article-likeness is a client concern.
 - `error_category`:
-  - `timeout`
+  - `timeout` — outer handler budget, queue wait, or a tier exception whose message contains `timeout` (browser and request tiers). Those tier timeouts also set `diagnostics.timeout_phase` (`boot`/`work`; request-tier timeouts are `work`).
   - `challenge_block`
   - `navigation_error`
   - `metadata_error`

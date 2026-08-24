@@ -111,6 +111,10 @@ class OpsTelemetryTests(unittest.TestCase):
             (message,) = mock_capture.call_args.args
             self.assertIn("timeout/boot", message)
             mock_scope.set_tag.assert_any_call("timeout_phase", "boot")
+            self.assertEqual(
+                mock_scope.fingerprint,
+                ["botasaurus-scrape-api", "timeout", "example.com"],
+            )
             mock_scope.set_context.assert_called_once_with(
                 "scrape",
                 {
