@@ -27,7 +27,7 @@ class MetadataExtractorUnitTests(unittest.TestCase):
             },
         )()
         status, headers, final_url = MetadataExtractor.extract_from_requests(
-            cast(DriverProtocol, driver), "https://example.com"
+            cast(DriverProtocol, driver)
         )
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})
@@ -65,7 +65,7 @@ class MetadataExtractorUnitTests(unittest.TestCase):
             },
         )()
         status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(
-            cast(DriverProtocol, driver), "https://example.com"
+            cast(DriverProtocol, driver)
         )
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})

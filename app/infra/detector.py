@@ -27,7 +27,6 @@ class ChallengeAssessment:
     blocked_detected: bool
     challenge_detected: bool
     detected_marker: str | None = None
-    error_category: str | None = None
 
     @property
     def is_clean(self) -> bool:
@@ -76,13 +75,8 @@ class ChallengeDetector:
             status_code in {401, 403, 429} if status_code is not None else False
         )
 
-        error_category = (
-            "challenge_block" if (challenge_detected or blocked_detected) else None
-        )
-
         return ChallengeAssessment(
             blocked_detected=blocked_detected,
             challenge_detected=challenge_detected,
             detected_marker=matched_marker,
-            error_category=error_category,
         )

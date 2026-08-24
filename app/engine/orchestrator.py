@@ -60,11 +60,7 @@ class ScraperEngine:
     def prune_runtime_dirs(self) -> int:
         with self._active_request_ids_lock:
             active = set(self._active_request_ids)
-        return prune_orphan_runtime_dirs(
-            self.runtime_root,
-            active,
-            min_free_bytes=self.settings.scrape_runtime_min_free_bytes,
-        )
+        return prune_orphan_runtime_dirs(self.runtime_root, active)
 
     def prepare_runtime_for_request(self) -> None:
         if runtime_root_low_on_space(

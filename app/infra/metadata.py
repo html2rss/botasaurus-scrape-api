@@ -30,9 +30,8 @@ class MetadataExtractor:
 
     @classmethod
     def extract_from_requests(
-        cls, driver: DriverProtocol, target_url: str
+        cls, driver: DriverProtocol
     ) -> tuple[int | None, dict[str, str] | None, str | None]:
-        del target_url
         reqs = getattr(driver, "requests", None)
         if not isinstance(reqs, (list, tuple)):
             return None, None, None
@@ -68,9 +67,8 @@ class MetadataExtractor:
 
     @classmethod
     def extract_from_cdp_logs(
-        cls, driver: DriverProtocol, target_url: str
+        cls, driver: DriverProtocol
     ) -> tuple[int | None, dict[str, str] | None, str | None]:
-        del target_url
         get_log = getattr(driver, "get_log", None)
         if not callable(get_log):
             return None, None, None
@@ -113,7 +111,7 @@ class MetadataExtractor:
 
         try:
             for extractor in (cls.extract_from_requests, cls.extract_from_cdp_logs):
-                status_code, headers, passive_url = extractor(driver, target_url)
+                status_code, headers, passive_url = extractor(driver)
                 if status_code is not None:
                     return MetadataResult(
                         status_code=status_code,

@@ -8,7 +8,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from typing import Any
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -173,7 +172,3 @@ class ScrapeService:
             result.error_category if isinstance(result, ScrapeError) else None,
         )
         return ScrapeOutcome(body=result, status_code=status_code)
-
-    @staticmethod
-    def serialize(body: ScrapeSuccess | ScrapeError) -> dict[str, Any]:
-        return body.model_dump(mode="json")

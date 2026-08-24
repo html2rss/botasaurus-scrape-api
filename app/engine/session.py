@@ -28,19 +28,17 @@ class ScrapeSession:
         return self
 
     def prepare_profile_dirs(self) -> None:
-        last_error: OSError | None = None
-        for attempt in range(2):
-            try:
-                self.runtime_dir.mkdir(parents=True, exist_ok=False)
-                self.profile_dir.mkdir(parents=True, exist_ok=False)
-                return
-            except OSError as exc:
-                last_error = exc
-                if exc.errno != errno.ENOSPC or attempt > 0:
-                    raise
-                self.engine.prune_runtime_dirs()
-        if last_error is not None:
-            raise last_error
+        try:
+            self._make_dirs()
+        except OSError as exc:
+            if exc.errno != errno.ENOSPC:
+                raise
+            self.engine.prune_runtime_dirs()
+            self._make_dirs()
+
+    def _make_dirs(self) -> None:
+        self.runtime_dir.mkdir(parents=True, exist_ok=False)
+        self.profile_dir.mkdir(parents=True, exist_ok=False)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:

@@ -6,12 +6,11 @@ from app.infra.detector import ChallengeDetector
 
 
 class ChallengeDetectorUnitTests(unittest.TestCase):
-    def test_detects_challenge_marker_and_category(self):
+    def test_detects_challenge_marker(self):
         res = ChallengeDetector.detect("<html>Just a moment...</html>", 200)
         self.assertTrue(res.challenge_detected)
         self.assertTrue(res.blocked_detected)
         self.assertEqual(res.detected_marker, "Just a moment...")
-        self.assertEqual(res.error_category, "challenge_block")
         self.assertFalse(res.is_clean)
 
     def test_detects_http_status_block_without_marker(self):
@@ -19,7 +18,6 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertFalse(res.challenge_detected)
         self.assertTrue(res.blocked_detected)
         self.assertIsNone(res.detected_marker)
-        self.assertEqual(res.error_category, "challenge_block")
         self.assertFalse(res.is_clean)
 
     def test_clean_response(self):
@@ -27,7 +25,6 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertTrue(res.is_clean)
         self.assertFalse(res.blocked_detected)
         self.assertFalse(res.challenge_detected)
-        self.assertIsNone(res.error_category)
 
     def test_driver_bot_detection_integration(self):
         mock_driver = MagicMock()
@@ -39,4 +36,3 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertTrue(res.challenge_detected)
         self.assertTrue(res.blocked_detected)
         self.assertEqual(res.detected_marker, "botasaurus_driver_bot_detected")
-        self.assertEqual(res.error_category, "challenge_block")

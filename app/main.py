@@ -15,8 +15,6 @@ from app.engine import ScraperEngine
 from app.infra.sentry import flush_sentry, setup_sentry
 from app.logging_config import setup_logging
 
-configure_openapi(get_settings())
-
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()

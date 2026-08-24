@@ -20,11 +20,8 @@ def runtime_root_low_on_space(
 def prune_orphan_runtime_dirs(
     runtime_root: Path,
     active_request_ids: set[str],
-    *,
-    min_free_bytes: int | None = None,
 ) -> int:
     """Delete runtime dirs that are not tied to an active request id."""
-    del min_free_bytes
     if not runtime_root.is_dir():
         return 0
 
