@@ -33,7 +33,6 @@ def remaining_total_seconds(settings: Settings, started_monotonic: float) -> int
 
 
 def run_request_tier(
-    engine: object,
     payload: ScrapeRequest,
     request_id: str,
     started_monotonic: float,
@@ -41,7 +40,6 @@ def run_request_tier(
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError | None:
-    del engine
     target_url = str(payload.url)
     remaining_budget = remaining_total_seconds(settings, started_monotonic)
     progress.mark(

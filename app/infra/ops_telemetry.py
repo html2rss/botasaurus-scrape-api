@@ -3,11 +3,10 @@ from __future__ import annotations
 import logging
 from urllib.parse import urlparse
 
+from app.constants import SERVICE_NAME
 from app.schemas import ErrorCategory, ScrapeError
 
 logger = logging.getLogger("botasaurus_scrape_api")
-
-SERVICE_NAME = "botasaurus-scrape-api"
 
 _P0_CATEGORIES = frozenset(
     {

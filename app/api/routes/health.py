@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 from fastapi import APIRouter
 
 from app.api.openapi import HEALTH_RESPONSES
+from app.constants import SERVICE_NAME
 from app.schemas import HealthResponse
 
 router = APIRouter(tags=["health"])
@@ -28,6 +29,6 @@ def health() -> HealthResponse:
 
     return HealthResponse(
         status="ok",
-        service="botasaurus-scrape-api",
+        service=SERVICE_NAME,
         botasaurus_version=botasaurus_version,
     )

@@ -113,7 +113,6 @@ class ScraperEngine:
             if should_try_request_tier:
                 try:
                     request_result = run_request_tier(
-                        self,
                         payload,
                         resolved_request_id,
                         started_monotonic,
@@ -148,7 +147,6 @@ class ScraperEngine:
                         )
 
             return run_browser_tier(
-                self,
                 payload,
                 session,
                 started_monotonic,

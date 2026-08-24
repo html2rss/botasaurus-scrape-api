@@ -1,4 +1,5 @@
-# app/scrape_progress.py
+"""In-memory scrape progress tracking for timeout phase diagnostics."""
+
 from __future__ import annotations
 
 import threading

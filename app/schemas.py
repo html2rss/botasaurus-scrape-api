@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import uuid
 from enum import StrEnum
@@ -14,6 +16,7 @@ from pydantic import (
 )
 
 from app.config import get_settings
+from app.constants import SERVICE_NAME
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -410,7 +413,7 @@ class HealthResponse(BaseModel):
     )
     service: str = Field(
         description="Service identity.",
-        examples=["botasaurus-scrape-api"],
+        examples=[SERVICE_NAME],
     )
     botasaurus_version: str = Field(
         description="Installed Botasaurus package version, or `unknown` if metadata is missing.",
@@ -422,7 +425,7 @@ class HealthResponse(BaseModel):
             "examples": [
                 {
                     "status": "ok",
-                    "service": "botasaurus-scrape-api",
+                    "service": SERVICE_NAME,
                     "botasaurus_version": "4.0.91",
                 }
             ]
@@ -475,6 +478,6 @@ SCRAPE_ERROR_EXAMPLE = {
 
 HEALTH_EXAMPLE = {
     "status": "ok",
-    "service": "botasaurus-scrape-api",
+    "service": SERVICE_NAME,
     "botasaurus_version": "4.0.91",
 }

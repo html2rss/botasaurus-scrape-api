@@ -1,5 +1,4 @@
-# app/xhr_collector.py
-"""Collect JSON XHR/fetch response bodies via CDP network events.
+"""XHR/fetch JSON response capture via CDP network events.
 
 Phase 0 finding: ``Network.getResponseBody`` deadlocks when called from inside a
 ``LoadingFinished`` handler (CDP session re-entrancy). Handlers only record

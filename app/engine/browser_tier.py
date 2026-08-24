@@ -61,7 +61,6 @@ def is_timeout_exception(exc: Exception) -> bool:
 
 
 def run_browser_tier(
-    engine: object,
     payload: ScrapeRequest,
     session: ScrapeSession,
     started_monotonic: float,
