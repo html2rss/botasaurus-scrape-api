@@ -5,11 +5,56 @@
 - Docker-first and Docker-only unless user asks otherwise.
 - Keep repo focused: stable Botasaurus scrape API wrapper, not generic framework.
 
+## Project Layout
+
+```
+app/
+  main.py              # create_app() factory; module-level `app` for uvicorn
+  config.py            # Settings (pydantic-settings); single env source of truth
+  schemas.py           # wire Pydantic models + OpenAPI examples
+  exceptions.py        # domain exceptions (e.g. RequestIdCollisionError)
+  api/
+    deps.py            # FastAPI Depends: settings, engine, executor, ScrapeService
+    errors.py          # 422 + 500 handlers → scrape error envelope
+    openapi.py         # route OpenAPI metadata
+    routes/            # thin HTTP handlers (health, scrape)
+  domain/
+    scrape_service.py  # validation, threadpool orchestration, status mapping
+  engine/
+    orchestrator.py    # ScraperEngine.execute
+    session.py         # ScrapeSession lifecycle
+    request_tier.py    # HTTP/curl_cffi path
+    browser_tier.py    # Chromium path
+    strategies.py      # NavigationMode resolution, driver helpers
+    envelope.py        # success/error builders, UTF-8 HTML normalization
+  infra/               # telemetry, progress, metadata, xhr, runtime cleanup, sentry
+  security/            # UrlGuard SSRF guardrails
+tests/
+  support/http.py      # TestClient + dependency_overrides helper
+```
+
+Layer rules:
+
+| Layer | May import | Must not import |
+| --- | --- | --- |
+| `api/routes` | `domain`, `api/deps`, `schemas` | `engine` internals, Botasaurus |
+| `domain` | `engine`, `security`, `schemas`, `infra` | FastAPI, Botasaurus |
+| `engine` | `infra`, `security`, `schemas`, `config` | FastAPI |
+| `infra` | Botasaurus, CDP | FastAPI, routes |
+
+Conventions:
+
+- Use `create_app()` in tests; override deps via `app.dependency_overrides`, not module globals.
+- Config: add env vars to `Settings` in `config.py`; call `reset_settings_cache()` in tests that patch env.
+- Wire types stay in `schemas.py`; domain logic stays out of route handlers and Pydantic shells.
+- Typed exceptions over string-matching (`RequestIdCollisionError`, not `RuntimeError` message checks).
+- `NavigationMode` end-to-end in engine code; no raw strategy strings outside enum conversion boundaries.
+
 ## Contract (Do Not Break)
 
 - Endpoints: `GET /health`, `POST /scrape`.
 - `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`. Spectral (`make spectral`) lints the snapshot; do not add a post-processor that mutates the dump.
-- Wire types live in `app/schemas.py`. Engine imports them. Routes `model_dump()` once into `JSONResponse`.
+- Wire types live in `app/schemas.py`. Engine imports them. Routes serialize via `ScrapeService.serialize()` / `json_response()`.
 - OpenAPI `info.version` is `2.0.0`. Schema names: `ScrapeSuccess` (200) and `ScrapeError` (400/403/422/502/504). No `ScrapeResponse` alias.
 - Success `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `metadata_error`, `xhr_responses`, `diagnostics`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
@@ -37,7 +82,7 @@
   - delete request runtime dir
   - remove in-memory active request id
 - Before each scrape, prune orphaned runtime dirs not tied to an active request id; ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
-- Keep request-id collision/invariant guard (`_active_request_ids`) intact.
+- Keep request-id collision/invariant guard (`_active_request_ids`) intact; raises `RequestIdCollisionError`.
 - `driver.requests.get` metadata is best-effort; metadata failure must not fail HTML success.
 - Keep strategy engine behavior:
   - `auto` mode attempt order: `google_get` -> `google_get_bypass` -> `get`

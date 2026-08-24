@@ -1,27 +1,30 @@
-# app/runtime_cleanup.py
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
-MIN_FREE_BYTES = int(os.getenv("SCRAPE_RUNTIME_MIN_FREE_BYTES", str(256 * 1024 * 1024)))
 
-
-def runtime_root_low_on_space(runtime_root: Path) -> bool:
-    """Return True when free space under runtime_root's filesystem is below MIN_FREE_BYTES."""
+def runtime_root_low_on_space(
+    runtime_root: Path,
+    *,
+    min_free_bytes: int,
+) -> bool:
+    """Return True when free space under runtime_root's filesystem is below min_free_bytes."""
     runtime_root.mkdir(parents=True, exist_ok=True)
-    return shutil.disk_usage(runtime_root).free < MIN_FREE_BYTES
+    return shutil.disk_usage(runtime_root).free < min_free_bytes
 
 
 def prune_orphan_runtime_dirs(
     runtime_root: Path,
     active_request_ids: set[str],
+    *,
+    min_free_bytes: int | None = None,
 ) -> int:
     """Delete runtime dirs that are not tied to an active request id."""
+    del min_free_bytes
     if not runtime_root.is_dir():
         return 0
 

@@ -1,10 +1,11 @@
-# app/ops_telemetry.py
 from __future__ import annotations
 
+import logging
 from urllib.parse import urlparse
 
 from app.schemas import ErrorCategory, ScrapeError
-from app.sentry import sentry_is_ready
+
+logger = logging.getLogger("botasaurus_scrape_api")
 
 SERVICE_NAME = "botasaurus-scrape-api"
 
@@ -51,6 +52,8 @@ def _apply_scrape_tags(scope: object, result: ScrapeError, *, http_status: int) 
 
 def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
     """Emit P0 operational scrape failures to Sentry as grouped Issues."""
+    from app.infra.sentry import sentry_is_ready
+
     if not sentry_is_ready():
         return
     if result.error_category not in _P0_CATEGORIES:
@@ -74,6 +77,8 @@ def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
 
 def record_challenge_block(result: ScrapeError) -> None:
     """Increment challenge_block product signal metric; stdout logging stays in engine."""
+    from app.infra.sentry import sentry_is_ready
+
     if not sentry_is_ready():
         return
     if result.error_category != ErrorCategory.CHALLENGE_BLOCK:

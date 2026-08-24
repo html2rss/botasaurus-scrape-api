@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import os
 import unittest
+from contextlib import contextmanager
 from unittest.mock import patch
 
-import app.sentry as sentry_mod
-from app.sentry import (
+import app.infra.sentry as sentry_mod
+from app.config import reset_settings_cache
+from app.infra.sentry import (
     _before_send,
     flush_sentry,
     is_sentry_enabled,
@@ -15,37 +17,45 @@ from app.sentry import (
 )
 
 
+@contextmanager
+def env(**values: str):
+    with patch.dict(os.environ, values, clear=True):
+        reset_settings_cache()
+        yield
+
+
 class SentryIntegrationTests(unittest.TestCase):
     def setUp(self):
         sentry_mod._INITIALIZED = False
+        reset_settings_cache()
 
     def test_is_sentry_enabled(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with env():
             self.assertFalse(is_sentry_enabled())
 
-        with patch.dict(os.environ, {"SENTRY_DSN": ""}):
+        with env(SENTRY_DSN=""):
             self.assertFalse(is_sentry_enabled())
 
-        with patch.dict(os.environ, {"SENTRY_DSN": "   "}):
+        with env(SENTRY_DSN="   "):
             self.assertFalse(is_sentry_enabled())
 
-        with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
+        with env(SENTRY_DSN="https://key@sentry.io/123"):
             self.assertTrue(is_sentry_enabled())
 
     def test_sentry_is_ready_requires_init(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with env():
             self.assertFalse(sentry_is_ready())
 
-        with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
+        with env(SENTRY_DSN="https://key@sentry.io/123"):
             self.assertFalse(sentry_is_ready())
 
         sentry_mod._INITIALIZED = True
-        with patch.dict(os.environ, {"SENTRY_DSN": "https://key@sentry.io/123"}):
+        with env(SENTRY_DSN="https://key@sentry.io/123"):
             self.assertTrue(sentry_is_ready())
 
     def test_setup_sentry_noop_when_dsn_absent(self):
         with (
-            patch.dict(os.environ, {}, clear=True),
+            env(),
             patch("sentry_sdk.init") as mock_init,
         ):
             result = setup_sentry()
@@ -57,7 +67,7 @@ class SentryIntegrationTests(unittest.TestCase):
         for val in ("", "   ", "\t\n"):
             with (
                 self.subTest(val=repr(val)),
-                patch.dict(os.environ, {"SENTRY_DSN": val}),
+                env(SENTRY_DSN=val),
                 patch("sentry_sdk.init") as mock_init,
             ):
                 result = setup_sentry()
@@ -68,7 +78,7 @@ class SentryIntegrationTests(unittest.TestCase):
     def test_setup_sentry_initializes_with_defaults(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
         with (
-            patch.dict(os.environ, {"SENTRY_DSN": dsn}, clear=True),
+            env(SENTRY_DSN=dsn),
             patch("sentry_sdk.init") as mock_init,
             self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
         ):
@@ -97,16 +107,15 @@ class SentryIntegrationTests(unittest.TestCase):
 
     def test_setup_sentry_reads_custom_env_options(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
-        env_vars = {
-            "SENTRY_DSN": dsn,
-            "SENTRY_ENVIRONMENT": "staging",
-            "SENTRY_RELEASE": "v2.0.0+abc1234",
-            "SENTRY_TRACES_SAMPLE_RATE": "0.25",
-            "SENTRY_PROFILES_SAMPLE_RATE": "0.10",
-            "SENTRY_SEND_DEFAULT_PII": "true",
-        }
         with (
-            patch.dict(os.environ, env_vars, clear=True),
+            env(
+                SENTRY_DSN=dsn,
+                SENTRY_ENVIRONMENT="staging",
+                SENTRY_RELEASE="v2.0.0+abc1234",
+                SENTRY_TRACES_SAMPLE_RATE="0.25",
+                SENTRY_PROFILES_SAMPLE_RATE="0.10",
+                SENTRY_SEND_DEFAULT_PII="true",
+            ),
             patch("sentry_sdk.init") as mock_init,
         ):
             result = setup_sentry()
@@ -144,13 +153,8 @@ class SentryIntegrationTests(unittest.TestCase):
 
     def test_setup_sentry_clamps_sample_rates_and_handles_invalid_floats(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
-        # Invalid string falls back to 0.0
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": dsn, "SENTRY_TRACES_SAMPLE_RATE": "invalid_float"},
-                clear=True,
-            ),
+            env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="invalid_float"),
             patch("sentry_sdk.init") as mock_init,
         ):
             result = setup_sentry()
@@ -159,14 +163,9 @@ class SentryIntegrationTests(unittest.TestCase):
             init_kwargs = mock_init.call_args.kwargs
             self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
 
-        # > 1.0 is clamped to 1.0
         sentry_mod._INITIALIZED = False
         with (
-            patch.dict(
-                os.environ,
-                {"SENTRY_DSN": dsn, "SENTRY_TRACES_SAMPLE_RATE": "2.5"},
-                clear=True,
-            ),
+            env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="2.5"),
             patch("sentry_sdk.init") as mock_init,
         ):
             result = setup_sentry()
@@ -189,7 +188,6 @@ class SentryIntegrationTests(unittest.TestCase):
     def test_flush_sentry_swallows_exceptions_cleanly(self):
         sentry_mod._INITIALIZED = True
         with patch("sentry_sdk.flush", side_effect=RuntimeError("flush timeout")):
-            # Should not raise
             flush_sentry()
 
 

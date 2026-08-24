@@ -7,13 +7,19 @@ from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
-from app.detector import ChallengeDetector
 from app.engine import (
     ScraperEngine,
     html_document_headers,
     utf8_normalize_html,
 )
-from app.metadata import MetadataExtractor
+from app.engine.strategies import (
+    apply_scrolling,
+    resolve_strategies,
+    wait_for_readiness,
+)
+from app.exceptions import RequestIdCollisionError
+from app.infra.detector import ChallengeDetector
+from app.infra.metadata import MetadataExtractor
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
@@ -181,7 +187,7 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(runtime_root=Path(tmp))
-            with patch("app.engine.Driver", _FakeDriver):
+            with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
         self.assertIsNone(result.error if isinstance(result, ScrapeError) else None)
@@ -204,7 +210,7 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(runtime_root=Path(tmp))
-            with patch("app.engine.Request", _FakeRequest):
+            with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
         self.assertIsInstance(result, ScrapeSuccess)
@@ -233,7 +239,7 @@ class MainUnitTests(unittest.TestCase):
         payload = ScrapeRequest(url="https://example.com", execution_mode="request")
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(runtime_root=Path(tmp))
-            with patch("app.engine.Request", _FakeRequest):
+            with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
         self.assertEqual(result.html, html)
@@ -252,8 +258,8 @@ class MainUnitTests(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as tmp:
                     engine = ScraperEngine(runtime_root=Path(tmp))
                     with (
-                        patch("app.engine.Request", _FakeRequest),
-                        patch("app.engine.Driver", _ArticleDriver),
+                        patch("app.engine.request_tier.Request", _FakeRequest),
+                        patch("app.engine.browser_tier.Driver", _ArticleDriver),
                     ):
                         result = engine.execute(payload)
 
@@ -268,17 +274,29 @@ class MainUnitTests(unittest.TestCase):
                 )
 
     def test_strategy_selection(self):
-        self.assertEqual(ScraperEngine.resolve_strategies("auto", 0), ["google_get"])
         self.assertEqual(
-            ScraperEngine.resolve_strategies("auto", 2),
-            ["google_get", "google_get_bypass", "get"],
+            resolve_strategies(NavigationMode.AUTO, 0),
+            [NavigationMode.GOOGLE_GET],
         )
         self.assertEqual(
-            ScraperEngine.resolve_strategies("get", 2), ["get", "get", "get"]
+            resolve_strategies(NavigationMode.AUTO, 2),
+            [
+                NavigationMode.GOOGLE_GET,
+                NavigationMode.GOOGLE_GET_BYPASS,
+                NavigationMode.GET,
+            ],
         )
         self.assertEqual(
-            ScraperEngine.resolve_strategies("organic_get", 2),
-            ["organic_get", "organic_get", "organic_get"],
+            resolve_strategies(NavigationMode.GET, 2),
+            [NavigationMode.GET, NavigationMode.GET, NavigationMode.GET],
+        )
+        self.assertEqual(
+            resolve_strategies(NavigationMode.ORGANIC_GET, 2),
+            [
+                NavigationMode.ORGANIC_GET,
+                NavigationMode.ORGANIC_GET,
+                NavigationMode.ORGANIC_GET,
+            ],
         )
 
     def test_cleanup_runs_on_navigation_error(self):
@@ -294,7 +312,7 @@ class MainUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch("app.engine.Driver", _FakeDriver):
+            with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
             self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
@@ -318,7 +336,7 @@ class MainUnitTests(unittest.TestCase):
                 raise OSError(28, "No space left on device")
 
             with (
-                patch("app.engine.Driver", _FakeDriver),
+                patch("app.engine.browser_tier.Driver", _FakeDriver),
                 patch.object(Path, "mkdir", side_effect=boom_mkdir),
             ):
                 result = engine.execute(payload)
@@ -343,7 +361,7 @@ class MainUnitTests(unittest.TestCase):
             (orphan / "profile").mkdir()
 
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch("app.engine.Driver", _FakeDriver):
+            with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
             self.assertIsInstance(result, ScrapeSuccess)
@@ -372,7 +390,7 @@ class MainUnitTests(unittest.TestCase):
             (orphan / "profile").mkdir()
 
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch("app.engine.Request", _FakeRequest):
+            with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
             self.assertEqual(result.html, html)
@@ -397,7 +415,7 @@ class MainUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(runtime_root=runtime_root)
-            with patch("app.engine.Driver", _CaptureDriver):
+            with patch("app.engine.browser_tier.Driver", _CaptureDriver):
                 result = engine.execute(payload)
 
         self.assertIsInstance(result, ScrapeSuccess)
@@ -416,7 +434,7 @@ class MainUnitTests(unittest.TestCase):
     def test_apply_scrolling(self):
         mock_driver = MagicMock()
         mock_driver.scroll_to_bottom = MagicMock()
-        ScraperEngine.apply_scrolling(mock_driver)
+        apply_scrolling(mock_driver)
         mock_driver.scroll_to_bottom.assert_called_once()
 
 
@@ -590,8 +608,11 @@ class ScraperEngineUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(runtime_root=Path(tmp))
             with (
-                patch("app.engine.Driver", _NavigateCaptureDriver),
-                patch("app.engine.time.monotonic", side_effect=monotonic_values),
+                patch("app.engine.browser_tier.Driver", _NavigateCaptureDriver),
+                patch(
+                    "app.engine.browser_tier.time.monotonic",
+                    side_effect=monotonic_values,
+                ),
             ):
                 result = engine.execute(payload)
 
@@ -601,7 +622,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
     def test_request_id_collision_raises(self):
         engine = ScraperEngine()
         engine.register_request_id("req-123")
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(RequestIdCollisionError):
             engine.register_request_id("req-123")
         engine.unregister_request_id("req-123")
         # Should be re-registerable after unregistering
@@ -700,7 +721,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
     def test_wait_for_readiness_uses_sleep_random_when_available(self):
         mock_driver = MagicMock()
         mock_driver.sleep_random = MagicMock()
-        ScraperEngine.wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
+        wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
         mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
 
 
@@ -755,7 +776,7 @@ class _FakeTab:
 
 class XhrCollectorTests(unittest.TestCase):
     def setUp(self):
-        from app.xhr_collector import XhrCollector
+        from app.infra.xhr_collector import XhrCollector
 
         self.XhrCollector = XhrCollector
         self.target = "https://example.com/"
@@ -912,10 +933,7 @@ class RequestIdContractTests(unittest.TestCase):
     INBOUND_ID = "550e8400-e29b-41d4-a716-446655440000"
 
     def test_honored_request_id_on_200(self):
-        from fastapi.testclient import TestClient
-
-        import app.main as main_mod
-        from app.main import app
+        from tests.support.http import test_client
 
         def fake_execute(payload, _deadline=None, *, request_id=None, progress=None):
             return ScrapeSuccess(
@@ -929,8 +947,7 @@ class RequestIdContractTests(unittest.TestCase):
                 ),
             )
 
-        with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
-            client = TestClient(app)
+        with test_client(execute_side_effect=fake_execute) as client:
             response = client.post(
                 "/scrape",
                 json={"url": "https://example.com"},
@@ -978,21 +995,19 @@ class RequestIdContractTests(unittest.TestCase):
         self.assertEqual(body["error_category"], "validation")
 
     def test_request_id_collision_returns_502(self):
-        from fastapi.testclient import TestClient
+        from tests.support.http import test_client
 
-        import app.main as main_mod
-        from app.main import app
-
-        main_mod._engine.register_request_id(self.INBOUND_ID)
+        engine = ScraperEngine()
+        engine.register_request_id(self.INBOUND_ID)
         try:
-            client = TestClient(app)
-            response = client.post(
-                "/scrape",
-                json={"url": "https://example.com"},
-                headers={"X-Request-Id": self.INBOUND_ID},
-            )
+            with test_client(engine=engine) as client:
+                response = client.post(
+                    "/scrape",
+                    json={"url": "https://example.com"},
+                    headers={"X-Request-Id": self.INBOUND_ID},
+                )
         finally:
-            main_mod._engine.unregister_request_id(self.INBOUND_ID)
+            engine.unregister_request_id(self.INBOUND_ID)
 
         self.assertEqual(response.status_code, 502)
         body = response.json()
@@ -1031,10 +1046,7 @@ class SchemaValidationHttpTests(unittest.TestCase):
         self.assertIn("field=window_size", log_text)
 
     def test_scrape_clamps_wait_timeout_instead_of_422(self):
-        from fastapi.testclient import TestClient
-
-        import app.main as main_mod
-        from app.main import app
+        from tests.support.http import test_client
 
         captured: dict[str, int] = {}
 
@@ -1051,8 +1063,7 @@ class SchemaValidationHttpTests(unittest.TestCase):
                 ),
             )
 
-        with patch.object(main_mod._engine, "execute", side_effect=fake_execute):
-            client = TestClient(app)
+        with test_client(execute_side_effect=fake_execute) as client:
             response = client.post(
                 "/scrape",
                 json={

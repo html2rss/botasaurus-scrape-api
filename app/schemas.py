@@ -1,5 +1,4 @@
 import logging
-import os
 import uuid
 from enum import StrEnum
 from typing import Any, Literal
@@ -14,18 +13,14 @@ from pydantic import (
     field_validator,
 )
 
+from app.config import get_settings
+
 logger = logging.getLogger("botasaurus_scrape_api")
 
-DEFAULT_SCRAPE_TIMEOUT_SECONDS = int(os.getenv("SCRAPE_TIMEOUT_SECONDS", "45"))
-DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS = int(
-    os.getenv("SCRAPE_WORK_TIMEOUT_SECONDS", "30")
-)
-if DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS > DEFAULT_SCRAPE_TIMEOUT_SECONDS:
-    raise ValueError(
-        "SCRAPE_WORK_TIMEOUT_SECONDS cannot exceed SCRAPE_TIMEOUT_SECONDS: "
-        f"work={DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS} total={DEFAULT_SCRAPE_TIMEOUT_SECONDS}"
-    )
-DEFAULT_WAIT_TIMEOUT_SECONDS = min(15, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS)
+_settings = get_settings()
+DEFAULT_SCRAPE_TIMEOUT_SECONDS = _settings.scrape_timeout_seconds
+DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS = _settings.scrape_work_timeout_seconds
+DEFAULT_WAIT_TIMEOUT_SECONDS = _settings.default_wait_timeout_seconds
 
 
 class ExecutionMode(StrEnum):

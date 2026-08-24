@@ -1,0 +1,54 @@
+"""Per-request browser session lifecycle and filesystem isolation."""
+
+from __future__ import annotations
+
+import errno
+import shutil
+from typing import TYPE_CHECKING, Any
+
+from botasaurus.browser import Driver
+
+if TYPE_CHECKING:
+    from app.engine.orchestrator import ScraperEngine
+
+
+class ScrapeSession:
+    """Encapsulates per-request concurrency registration and filesystem isolation."""
+
+    def __init__(self, engine: ScraperEngine, request_id: str) -> None:
+        self.engine = engine
+        self.request_id = request_id
+        self.runtime_dir = engine.runtime_root / request_id
+        self.profile_dir = self.runtime_dir / "profile"
+        self.driver: Driver | None = None
+
+    def __enter__(self) -> ScrapeSession:
+        self.engine.register_request_id(self.request_id)
+        self.engine.prepare_runtime_for_request()
+        return self
+
+    def prepare_profile_dirs(self) -> None:
+        last_error: OSError | None = None
+        for attempt in range(2):
+            try:
+                self.runtime_dir.mkdir(parents=True, exist_ok=False)
+                self.profile_dir.mkdir(parents=True, exist_ok=False)
+                return
+            except OSError as exc:
+                last_error = exc
+                if exc.errno != errno.ENOSPC or attempt > 0:
+                    raise
+                self.engine.prune_runtime_dirs()
+        if last_error is not None:
+            raise last_error
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        try:
+            if self.driver is not None:
+                try:
+                    self.driver.close()
+                except Exception:
+                    pass
+        finally:
+            shutil.rmtree(self.runtime_dir, ignore_errors=True)
+            self.engine.unregister_request_id(self.request_id)

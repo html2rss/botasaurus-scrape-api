@@ -1,38 +1,20 @@
-# app/sentry.py
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
+
+from app.config import Settings
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
 _INITIALIZED = False
 
 
-def _parse_float(value: str | None, default: float) -> float:
-    if value is None:
-        return default
-    try:
-        parsed = float(value.strip())
-        return max(0.0, min(1.0, parsed))
-    except (ValueError, AttributeError):  # fmt: skip
-        return default
+def is_sentry_enabled(settings: Settings | None = None) -> bool:
+    from app.config import get_settings
 
-
-def _parse_bool(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    if normalized in ("true", "1", "yes", "on"):
-        return True
-    if normalized in ("false", "0", "no", "off"):
-        return False
-    return default
-
-
-def is_sentry_enabled() -> bool:
-    return bool(os.getenv("SENTRY_DSN", "").strip())
+    resolved = settings or get_settings()
+    return bool(resolved.sentry_dsn.strip())
 
 
 def sentry_is_ready() -> bool:
@@ -58,11 +40,14 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] 
     return event
 
 
-def setup_sentry() -> bool:
+def setup_sentry(settings: Settings | None = None) -> bool:
     """Initialize Sentry when SENTRY_DSN is set. Returns True on success."""
     global _INITIALIZED
 
-    dsn = os.getenv("SENTRY_DSN", "").strip()
+    from app.config import get_settings
+
+    resolved = settings or get_settings()
+    dsn = resolved.sentry_dsn.strip()
     if not dsn:
         return False
 
@@ -76,19 +61,14 @@ def setup_sentry() -> bool:
         )
         return False
 
-    environment = (
-        os.getenv("SENTRY_ENVIRONMENT") or os.getenv("ENVIRONMENT") or "production"
-    ).strip()
-    release = os.getenv("SENTRY_RELEASE")
-    traces_sample_rate = _parse_float(os.getenv("SENTRY_TRACES_SAMPLE_RATE"), 0.0)
-    profiles_sample_rate = _parse_float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE"), 0.0)
-    send_default_pii = _parse_bool(os.getenv("SENTRY_SEND_DEFAULT_PII"), default=False)
+    traces_sample_rate = max(0.0, min(1.0, resolved.sentry_traces_sample_rate))
+    profiles_sample_rate = max(0.0, min(1.0, resolved.sentry_profiles_sample_rate))
 
     init_kwargs: dict[str, Any] = {
         "dsn": dsn,
-        "environment": environment,
+        "environment": resolved.effective_sentry_environment,
         "traces_sample_rate": traces_sample_rate,
-        "send_default_pii": send_default_pii,
+        "send_default_pii": resolved.sentry_send_default_pii,
         "integrations": [
             FastApiIntegration(),
             StarletteIntegration(),
@@ -96,8 +76,8 @@ def setup_sentry() -> bool:
         "before_send": _before_send,
     }
 
-    if release:
-        init_kwargs["release"] = release.strip()
+    if resolved.sentry_release.strip():
+        init_kwargs["release"] = resolved.sentry_release.strip()
     if profiles_sample_rate > 0.0:
         init_kwargs["profiles_sample_rate"] = profiles_sample_rate
 
@@ -106,8 +86,8 @@ def setup_sentry() -> bool:
 
     logger.info(
         "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
-        environment,
-        release,
+        resolved.effective_sentry_environment,
+        resolved.sentry_release or None,
         traces_sample_rate,
     )
     return True

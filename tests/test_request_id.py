@@ -2,7 +2,7 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-from app.request_id import resolve_request_id
+from app.infra.request_id import resolve_request_id
 
 VALID_UUID = "550e8400-e29b-41d4-a716-446655440000"
 FALLBACK_UUID = "11111111-2222-4333-8444-555555555555"
@@ -96,7 +96,8 @@ class ResolveRequestIdTests(unittest.TestCase):
         for case in self.cases:
             with self.subTest(case=case["name"]):
                 with patch(
-                    "app.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)
+                    "app.infra.request_id.uuid.uuid4",
+                    return_value=uuid.UUID(FALLBACK_UUID),
                 ):
                     request_id, used_fallback = resolve_request_id(
                         case["inbound"], host="example.com"
@@ -107,7 +108,9 @@ class ResolveRequestIdTests(unittest.TestCase):
 
     def test_fallback_logs_reason_without_rejected_value(self):
         with (
-            patch("app.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)),
+            patch(
+                "app.infra.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)
+            ),
             self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
         ):
             resolve_request_id("bad/id", host="example.com")
@@ -118,7 +121,9 @@ class ResolveRequestIdTests(unittest.TestCase):
 
     def test_absent_fallback_logs_absent_reason(self):
         with (
-            patch("app.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)),
+            patch(
+                "app.infra.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)
+            ),
             self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
         ):
             resolve_request_id(None, host="example.com")

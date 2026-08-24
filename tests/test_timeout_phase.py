@@ -4,12 +4,14 @@ from __future__ import annotations
 import tempfile
 import time
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
-from app.main import handler_timeout_error
+from app.infra.scrape_progress import ScrapeProgress
 from app.schemas import (
     ExecutionMode,
     ExecutionTier,
@@ -17,7 +19,6 @@ from app.schemas import (
     ScrapeRequest,
     TimeoutPhase,
 )
-from app.scrape_progress import ScrapeProgress
 
 _URL = "https://example.com"
 _HTML = "<html><body><h1>Example Domain</h1></body></html>"
@@ -73,7 +74,15 @@ def _fake_request_cls(html=_HTML, url=f"{_URL}/"):
 def _execute(payload, *, progress, request_id, **patches):
     with tempfile.TemporaryDirectory() as tmp:
         engine = ScraperEngine(runtime_root=Path(tmp))
-        with patch.multiple("app.engine", create=True, **patches):
+        with ExitStack() as stack:
+            if "Driver" in patches:
+                stack.enter_context(
+                    patch("app.engine.browser_tier.Driver", patches["Driver"])
+                )
+            if "Request" in patches:
+                stack.enter_context(
+                    patch("app.engine.request_tier.Request", patches["Request"])
+                )
             return engine.execute(payload, request_id=request_id, progress=progress)
 
 
@@ -101,7 +110,7 @@ class ScrapeProgressTests(unittest.TestCase):
 
 class HandlerTimeoutErrorTests(unittest.TestCase):
     def test_queue_phase_keeps_zero_attempts(self):
-        result = handler_timeout_error(
+        result = ScrapeService.build_timeout_error(
             _URL,
             request_id="req-queue",
             started_monotonic=time.monotonic(),
@@ -122,7 +131,7 @@ class HandlerTimeoutErrorTests(unittest.TestCase):
             strategy_used=NavigationMode.GOOGLE_GET,
             execution_tier=ExecutionTier.BROWSER_DRIVER,
         )
-        result = handler_timeout_error(
+        result = ScrapeService.build_timeout_error(
             _URL,
             request_id="req-work",
             started_monotonic=time.monotonic() - 1,
@@ -243,10 +252,7 @@ class EngineProgressMarkTests(unittest.TestCase):
 
 class HandlerTimeoutHttpTests(unittest.TestCase):
     def test_scrape_handler_timeout_uses_progress(self):
-        from fastapi.testclient import TestClient
-
-        import app.main as main_mod
-        from app.main import app
+        from tests.support.http import test_client
 
         def fake_execute(_payload, _deadline=None, *, request_id=None, progress=None):
             assert progress is not None
@@ -260,10 +266,10 @@ class HandlerTimeoutHttpTests(unittest.TestCase):
             raise TimeoutError
 
         with (
-            patch.object(main_mod._engine, "execute", side_effect=fake_execute),
+            test_client(execute_side_effect=fake_execute) as client,
             patch("asyncio.wait_for", side_effect=boom),
         ):
-            response = TestClient(app).post(
+            response = client.post(
                 "/scrape",
                 json={
                     "url": _URL,
