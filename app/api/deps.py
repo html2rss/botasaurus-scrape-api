@@ -5,12 +5,11 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 
 from app.config import Settings
 from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
-from app.infra.request_id import resolve_request_id
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -43,12 +42,3 @@ def get_scrape_service(
 
 
 ScrapeServiceDep = Annotated[ScrapeService, Depends(get_scrape_service)]
-
-
-def resolve_scrape_request_id(
-    x_request_id: Annotated[str | None, Header(alias="X-Request-Id")] = None,
-    *,
-    host: str | None = None,
-) -> str:
-    request_id, _ = resolve_request_id(x_request_id, host=host)
-    return request_id

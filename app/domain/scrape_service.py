@@ -14,6 +14,7 @@ from app.engine import ScraperEngine
 from app.engine.budget import elapsed_ms
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
+from app.infra.request_id import resolve_request_id
 from app.infra.scrape_progress import ScrapeProgress
 from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, TimeoutPhase
@@ -36,7 +37,7 @@ class ScrapeOutcome:
 
 
 class ScrapeService:
-    """Owns URL validation, threadpool execution, status mapping, and telemetry."""
+    """Owns request-id resolution, URL guardrails, threadpool execution, status mapping, and telemetry."""
 
     def __init__(
         self,
@@ -49,14 +50,50 @@ class ScrapeService:
         self.engine = engine
         self.executor = executor
 
-    def validate_target(self, url: str) -> ValidationResult:
-        return UrlGuard.validate(url)
-
-    def validate_proxy(self, proxy_url: str) -> ValidationResult:
-        return UrlGuard.validate_proxy(proxy_url)
-
-    def validation_outcome(
+    async def process(
         self,
+        payload: ScrapeRequest,
+        *,
+        inbound_request_id: str | None = None,
+    ) -> ScrapeOutcome:
+        """Resolve the request id, enforce SSRF guardrails, then execute."""
+        target_url = str(payload.url)
+        request_id, _ = resolve_request_id(
+            inbound_request_id, host=urlparse(target_url).hostname
+        )
+        blocked = self._guard_outcome(payload, target_url, request_id=request_id)
+        if blocked is not None:
+            return blocked
+        return await self._run(payload, request_id=request_id)
+
+    def _guard_outcome(
+        self,
+        payload: ScrapeRequest,
+        target_url: str,
+        *,
+        request_id: str,
+    ) -> ScrapeOutcome | None:
+        target_validation = UrlGuard.validate(target_url)
+        if not target_validation.is_allowed:
+            return self._validation_outcome(
+                target_url,
+                target_validation,
+                request_id=request_id,
+                default_message="Target URL is blocked",
+            )
+        if payload.proxy:
+            proxy_validation = UrlGuard.validate_proxy(str(payload.proxy))
+            if not proxy_validation.is_allowed:
+                return self._validation_outcome(
+                    target_url,
+                    proxy_validation,
+                    request_id=request_id,
+                    default_message="Proxy URL is invalid or blocked",
+                )
+        return None
+
+    @staticmethod
+    def _validation_outcome(
         url: str,
         validation: ValidationResult,
         *,
@@ -100,7 +137,7 @@ class ScrapeService:
             ),
         )
 
-    async def run(
+    async def _run(
         self,
         payload: ScrapeRequest,
         *,

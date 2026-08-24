@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, Header
 from fastapi.responses import JSONResponse
 
-from app.api.deps import ScrapeServiceDep, resolve_scrape_request_id
+from app.api.deps import ScrapeServiceDep
 from app.api.errors import json_response
 from app.api.openapi import get_scrape_error_responses, get_scrape_success_response
 from app.schemas.request import ScrapeRequest
@@ -32,30 +30,5 @@ async def scrape(
     service: ScrapeServiceDep,
     x_request_id: str | None = Header(None, alias="X-Request-Id"),
 ) -> JSONResponse:
-    target_url = str(payload.url)
-    target_host = urlparse(target_url).hostname
-    request_id = resolve_scrape_request_id(x_request_id, host=target_host)
-
-    target_validation = service.validate_target(target_url)
-    if not target_validation.is_allowed:
-        outcome = service.validation_outcome(
-            target_url,
-            target_validation,
-            request_id=request_id,
-            default_message="Target URL is blocked",
-        )
-        return json_response(outcome.body, status_code=outcome.status_code)
-
-    if payload.proxy:
-        proxy_validation = service.validate_proxy(str(payload.proxy))
-        if not proxy_validation.is_allowed:
-            outcome = service.validation_outcome(
-                target_url,
-                proxy_validation,
-                request_id=request_id,
-                default_message="Proxy URL is invalid or blocked",
-            )
-            return json_response(outcome.body, status_code=outcome.status_code)
-
-    outcome = await service.run(payload, request_id=request_id)
+    outcome = await service.process(payload, inbound_request_id=x_request_id)
     return json_response(outcome.body, status_code=outcome.status_code)
