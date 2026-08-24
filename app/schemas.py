@@ -20,10 +20,14 @@ from app.constants import SERVICE_NAME
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
-_settings = get_settings()
-DEFAULT_SCRAPE_TIMEOUT_SECONDS = _settings.scrape_timeout_seconds
-DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS = _settings.scrape_work_timeout_seconds
-DEFAULT_WAIT_TIMEOUT_SECONDS = _settings.default_wait_timeout_seconds
+
+def _wait_timeout_field_description() -> str:
+    work_cap = get_settings().scrape_work_timeout_seconds
+    return (
+        "Selector wait timeout in seconds. Values outside "
+        f"[1, {work_cap}] are clamped into that "
+        "range so scrape still runs; they are not rejected with 422."
+    )
 
 
 class ExecutionMode(StrEnum):
@@ -189,12 +193,8 @@ class ScrapeRequest(BaseModel):
         examples=["h1"],
     )
     wait_timeout_seconds: int = Field(
-        default=DEFAULT_WAIT_TIMEOUT_SECONDS,
-        description=(
-            "Selector wait timeout in seconds. Values outside "
-            f"[1, {DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS}] are clamped into that "
-            "range so scrape still runs; they are not rejected with 422."
-        ),
+        default=15,
+        description=_wait_timeout_field_description(),
         examples=[15],
     )
     scroll: bool = Field(
@@ -296,7 +296,7 @@ class ScrapeRequest(BaseModel):
         except (TypeError, ValueError):  # fmt: skip
             return value
 
-        clamped = max(1, min(numeric, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS))
+        clamped = max(1, min(numeric, get_settings().scrape_work_timeout_seconds))
         if clamped != numeric:
             url = info.data.get("url")
             logger.info(

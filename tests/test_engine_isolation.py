@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.config import get_settings
 from app.engine import ScraperEngine
 from app.engine.session import ScrapeSession
 
@@ -187,7 +188,7 @@ class IsolationRegressionTests(unittest.TestCase):
 
     def test_shared_engine_tracks_active_request_ids(self):
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             request_id = "req-active-track"
             engine.register_request_id(request_id)
             try:

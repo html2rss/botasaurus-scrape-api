@@ -7,12 +7,17 @@ from typing import Annotated
 
 from fastapi import Depends, Header, Request
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
 from app.infra.request_id import resolve_request_id
 
-SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+def get_app_settings(request: Request) -> Settings:
+    return request.app.state.settings
+
+
+SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 
 
 def get_executor(request: Request) -> ThreadPoolExecutor:

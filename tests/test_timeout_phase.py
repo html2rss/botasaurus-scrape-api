@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.config import get_settings
 from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
 from app.infra.scrape_progress import ScrapeProgress
@@ -73,7 +74,7 @@ def _fake_request_cls(html=_HTML, url=f"{_URL}/"):
 
 def _execute(payload, *, progress, request_id, **patches):
     with tempfile.TemporaryDirectory() as tmp:
-        engine = ScraperEngine(runtime_root=Path(tmp))
+        engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
         with ExitStack() as stack:
             if "Driver" in patches:
                 stack.enter_context(
@@ -150,7 +151,7 @@ class HandlerTimeoutErrorTests(unittest.TestCase):
 class EngineProgressMarkTests(unittest.TestCase):
     def test_execute_queue_timeout_sets_phase(self):
         progress = ScrapeProgress()
-        result = ScraperEngine().execute(
+        result = ScraperEngine(settings=get_settings()).execute(
             ScrapeRequest(
                 url=_URL,
                 execution_mode=ExecutionMode.BROWSER,

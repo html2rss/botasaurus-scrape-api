@@ -9,7 +9,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
-from app.config import Settings, get_settings
+from app.config import Settings
 from app.engine.browser_tier import is_timeout_exception, run_browser_tier
 from app.engine.envelope import build_error
 from app.engine.request_tier import run_request_tier
@@ -40,10 +40,10 @@ class ScraperEngine:
     def __init__(
         self,
         *,
-        settings: Settings | None = None,
+        settings: Settings,
         runtime_root: Path | None = None,
     ) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings
         self.runtime_root = runtime_root or self.settings.runtime_root
         self._active_request_ids: set[str] = set()
         self._active_request_ids_lock = threading.Lock()

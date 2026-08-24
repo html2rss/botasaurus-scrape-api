@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
+from app.config import get_settings
 from app.engine import (
     ScraperEngine,
     html_document_headers,
@@ -21,8 +22,6 @@ from app.exceptions import RequestIdCollisionError
 from app.infra.detector import ChallengeDetector
 from app.infra.metadata import MetadataExtractor
 from app.schemas import (
-    DEFAULT_SCRAPE_TIMEOUT_SECONDS,
-    DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
     ErrorCategory,
     ExecutionMode,
     ExecutionTier,
@@ -152,11 +151,12 @@ class MainUnitTests(unittest.TestCase):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
             payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=35)
 
+        settings = get_settings()
         self.assertEqual(
-            payload.wait_timeout_seconds, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS
+            payload.wait_timeout_seconds, settings.scrape_work_timeout_seconds
         )
-        self.assertEqual(DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS, 30)
-        self.assertEqual(DEFAULT_SCRAPE_TIMEOUT_SECONDS, 45)
+        self.assertEqual(settings.scrape_work_timeout_seconds, 30)
+        self.assertEqual(settings.scrape_timeout_seconds, 45)
         log_text = "\n".join(captured.output)
         self.assertIn("host=example.com", log_text)
         self.assertIn("field=wait_timeout_seconds", log_text)
@@ -182,11 +182,11 @@ class MainUnitTests(unittest.TestCase):
             wait_timeout_seconds=35,
         )
         self.assertEqual(
-            payload.wait_timeout_seconds, DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS
+            payload.wait_timeout_seconds, get_settings().scrape_work_timeout_seconds
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
@@ -209,7 +209,7 @@ class MainUnitTests(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
@@ -238,7 +238,7 @@ class MainUnitTests(unittest.TestCase):
         )
         payload = ScrapeRequest(url="https://example.com", execution_mode="request")
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
@@ -256,7 +256,9 @@ class MainUnitTests(unittest.TestCase):
                     url="https://example.com/",
                 )
                 with tempfile.TemporaryDirectory() as tmp:
-                    engine = ScraperEngine(runtime_root=Path(tmp))
+                    engine = ScraperEngine(
+                        settings=get_settings(), runtime_root=Path(tmp)
+                    )
                     with (
                         patch("app.engine.request_tier.Request", _FakeRequest),
                         patch("app.engine.browser_tier.Driver", _ArticleDriver),
@@ -311,7 +313,7 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
-            engine = ScraperEngine(runtime_root=runtime_root)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
             with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
@@ -328,7 +330,7 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
-            engine = ScraperEngine(runtime_root=runtime_root)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
 
             def boom_mkdir(*_args, exist_ok=False, **_kwargs):
                 if exist_ok:
@@ -360,7 +362,7 @@ class MainUnitTests(unittest.TestCase):
             orphan.mkdir()
             (orphan / "profile").mkdir()
 
-            engine = ScraperEngine(runtime_root=runtime_root)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
             with patch("app.engine.browser_tier.Driver", _FakeDriver):
                 result = engine.execute(payload)
 
@@ -389,7 +391,7 @@ class MainUnitTests(unittest.TestCase):
             orphan.mkdir()
             (orphan / "profile").mkdir()
 
-            engine = ScraperEngine(runtime_root=runtime_root)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
             with patch("app.engine.request_tier.Request", _FakeRequest):
                 result = engine.execute(payload)
 
@@ -414,7 +416,7 @@ class MainUnitTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
-            engine = ScraperEngine(runtime_root=runtime_root)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
             with patch("app.engine.browser_tier.Driver", _CaptureDriver):
                 result = engine.execute(payload)
 
@@ -606,7 +608,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         ]
 
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with (
                 patch("app.engine.browser_tier.Driver", _NavigateCaptureDriver),
                 patch(
@@ -620,7 +622,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertEqual(captured["navigate_timeout"], 25)
 
     def test_request_id_collision_raises(self):
-        engine = ScraperEngine()
+        engine = ScraperEngine(settings=get_settings())
         engine.register_request_id("req-123")
         with self.assertRaises(RequestIdCollisionError):
             engine.register_request_id("req-123")
@@ -633,7 +635,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         from app.engine import ScrapeSession
 
         with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(runtime_root=Path(tmp))
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with ScrapeSession(engine, "req-session-1") as session:
                 self.assertIn("req-session-1", engine._active_request_ids)
                 session.prepare_profile_dirs()
@@ -997,7 +999,7 @@ class RequestIdContractTests(unittest.TestCase):
     def test_request_id_collision_returns_502(self):
         from tests.support.http import test_client
 
-        engine = ScraperEngine()
+        engine = ScraperEngine(settings=get_settings())
         engine.register_request_id(self.INBOUND_ID)
         try:
             with test_client(engine=engine) as client:
@@ -1076,7 +1078,7 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         self.assertNotEqual(response.status_code, 422)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured["wait"], DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS)
+        self.assertEqual(captured["wait"], get_settings().scrape_work_timeout_seconds)
         self.assertEqual(captured["wait"], 30)
 
 
