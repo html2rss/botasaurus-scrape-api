@@ -1,4 +1,4 @@
-.PHONY: test build serve health scrape-example smoke lint lintfix check ready openapi openapi-verify spectral
+.PHONY: test build serve health scrape-example smoke lint lintfix check ready openapi openapi-verify spectral typecheck
 
 .DEFAULT_GOAL := check
 
@@ -35,12 +35,15 @@ openapi-verify:
 	$(PYTHON) scripts/export_openapi.py --out $$tmp && \
 	diff -u $(OPENAPI_FILE) $$tmp
 
-check: lint test openapi-verify
+check: lint test typecheck openapi-verify
 
 ready: check
 
 test:
 	$(PYTHON) -m unittest discover -s tests
+
+typecheck:
+	$(PYTHON) -m pyright app tests
 
 
 build:

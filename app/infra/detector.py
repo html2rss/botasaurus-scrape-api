@@ -1,0 +1,81 @@
+"""Anti-bot challenge detection from HTML and driver signals."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+_CHALLENGE_MARKERS: tuple[str, ...] = (
+    "challenge-error-text",
+    "Enable JavaScript and cookies to continue",
+    "Just a moment...",
+    "cf-challenge",
+    "cf-turnstile",
+    "captcha-delivery.com",
+    "datadome",
+    "DataDome CAPTCHA",
+    "/captcha/?",
+    "attention required! | cloudflare",
+    "cloudflare-ray-id",
+    "shield.recaptcha.net",
+    "geo.captcha-delivery.com",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ChallengeAssessment:
+    blocked_detected: bool
+    challenge_detected: bool
+    detected_marker: str | None = None
+
+    @property
+    def is_clean(self) -> bool:
+        return not self.blocked_detected and not self.challenge_detected
+
+
+class ChallengeDetector:
+    """Deep module encapsulating anti-bot challenge heuristics, HTTP status codes, and driver checks."""
+
+    @classmethod
+    def detect(
+        cls,
+        html: str,
+        status_code: int | None = None,
+        driver: object | None = None,
+    ) -> ChallengeAssessment:
+        lower_html = html.lower()
+        matched_marker: str | None = None
+
+        # 1. Driver-level anti-bot signal inspection
+        if driver is not None:
+            for method_name, marker_label in (
+                ("is_bot_detected", "botasaurus_driver_bot_detected"),
+                ("is_in_challenge", "botasaurus_driver_challenge"),
+                ("is_blocked", "botasaurus_driver_blocked"),
+            ):
+                check_fn = getattr(driver, method_name, None)
+                if callable(check_fn):
+                    try:
+                        if check_fn():
+                            matched_marker = marker_label
+                            break
+                    except Exception:
+                        # Best-effort driver bot detection check
+                        pass
+
+        # 2. HTML text markers
+        if matched_marker is None:
+            for marker in _CHALLENGE_MARKERS:
+                if marker.lower() in lower_html:
+                    matched_marker = marker
+                    break
+
+        challenge_detected = matched_marker is not None
+        blocked_detected = challenge_detected or (
+            status_code in {401, 403, 429} if status_code is not None else False
+        )
+
+        return ChallengeAssessment(
+            blocked_detected=blocked_detected,
+            challenge_detected=challenge_detected,
+            detected_marker=matched_marker,
+        )

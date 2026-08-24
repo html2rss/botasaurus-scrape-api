@@ -312,6 +312,7 @@ Exception:
 - Browser profile/session artifacts are request-scoped only.
 - No cache/profile/driver reuse across requests.
 - Cleanup is enforced in `finally`: driver close + runtime directory delete + request-id in-memory state scrub.
+- Before each scrape, orphaned runtime dirs (not tied to an active request id) are pruned; ENOSPC triggers an extra prune-and-retry. Mount `/tmp/scrape` on tmpfs in production (see html2rss-web `docker-compose.yml`).
 
 ## Environment Variables
 
@@ -321,20 +322,21 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SENTRY_DSN` | _(unset)_ | Project DSN. |
-| `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`ENVIRONMENT` fallback). |
-| `SENTRY_RELEASE` | _(unset)_ | Release tag on events. |
-| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (off by default; enable later if needed). |
-| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate. |
-| `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true`. |
+| `SENTRY_DSN` | _(unset)_ | Project DSN (`Settings.sentry.dsn`). |
+| `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`Settings.sentry.environment`; `ENVIRONMENT` fallback). |
+| `SENTRY_RELEASE` | _(unset)_ | Release tag on events (`Settings.sentry.release`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (`Settings.sentry.traces_sample_rate`; off by default). |
+| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate (`Settings.sentry.profiles_sample_rate`). |
+| `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true` (`Settings.sentry.send_default_pii`). |
 
 **Signal routing:** `navigation_error` and `timeout` → grouped Sentry Issues. `challenge_block` → `scrape.challenge_block` metric only; engine stdout keeps the detailed log line. Traces stay off unless you raise `SENTRY_TRACES_SAMPLE_RATE`.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. |
+| `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. On low-RAM hosts (for example Docker with `--memory=768m` or a 1–2 vCPU VM), use `1` or `2` to limit concurrent Chromium boots; higher values increase queue wait and swap pressure without improving wall time. |
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
+| `SCRAPE_RUNTIME_MIN_FREE_BYTES` | `268435456` (256 MiB) | Prune orphan runtime dirs when free space drops below this threshold. |
 
 ## Example Calls
 

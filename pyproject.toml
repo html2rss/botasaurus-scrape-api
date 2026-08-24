@@ -1,9 +1,41 @@
+[project]
+name = "botasaurus-scrape-api"
+version = "2.0.0"
+description = "Docker-first FastAPI wrapper around Botasaurus for rendered HTML scraping"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.4",
+    "pydantic-settings==2.13.1",
+    "sentry-sdk==2.68.0",
+    "botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff==0.16.4",
+    "PyYAML==6.0.3",
+    "pyright==1.1.406",
+]
+
 [tool.ruff]
 target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
 ignore = [
-    "E501",  # formatter owns line width
-    "SIM105",  # keep try/except-pass in isolation/cleanup and best-effort metadata
+    "E501",
+    "SIM105",
 ]
+
+[tool.pyright]
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+stubPath = "typings"
+typeCheckingMode = "strict"
+include = ["app", "tests"]
+exclude = [".venv"]
+reportMissingTypeStubs = true
+reportMissingImports = false
