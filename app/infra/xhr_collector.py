@@ -13,9 +13,6 @@ import logging
 import threading
 from typing import Any
 
-from botasaurus_driver import cdp
-from botasaurus_driver.core.custom_storage_cdp import enable_network
-
 logger = logging.getLogger("botasaurus_scrape_api")
 
 
@@ -37,6 +34,9 @@ class XhrCollector:
 
     def install(self, tab: Any) -> None:
         """Enable the network domain and register handlers before navigation."""
+        from botasaurus_driver import cdp
+        from botasaurus_driver.core.custom_storage_cdp import enable_network
+
         tab.send(enable_network())
         tab.after_response_received(self._on_response)
         tab.add_handler(cdp.network.LoadingFinished, self._on_finished)
@@ -74,7 +74,7 @@ class XhrCollector:
                 "request_id": request_id,
             }
 
-    def _on_finished(self, event: cdp.network.LoadingFinished) -> None:
+    def _on_finished(self, event: Any) -> None:
         # Do not call get_response_body here — CDP deadlocks (Phase 0 spike).
         rid = str(event.request_id)
         with self._lock:
@@ -116,6 +116,8 @@ class XhrCollector:
         return self.results()
 
     def _fetch_body(self, tab: Any, request_id: Any, rid: str) -> str | None:
+        from botasaurus_driver import cdp
+
         try:
             body, b64 = tab.send(cdp.network.get_response_body(request_id))
         except Exception as exc:

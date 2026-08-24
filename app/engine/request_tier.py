@@ -6,8 +6,6 @@ import logging
 import time
 from urllib.parse import urlparse
 
-from botasaurus.request import Request
-
 from app.config import Settings
 from app.engine.envelope import build_error, build_success
 from app.infra.detector import ChallengeDetector
@@ -34,6 +32,8 @@ def run_request_tier(
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError | None:
+    from botasaurus.request import Request
+
     target_url = str(payload.url)
     remaining_budget = remaining_total_seconds(settings, started_monotonic)
     progress.mark(

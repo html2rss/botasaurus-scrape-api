@@ -333,7 +333,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. |
+| `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. On low-RAM hosts (for example Docker with `--memory=768m` or a 1–2 vCPU VM), use `1` or `2` to limit concurrent Chromium boots; higher values increase queue wait and swap pressure without improving wall time. |
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
 | `SCRAPE_RUNTIME_MIN_FREE_BYTES` | `268435456` (256 MiB) | Prune orphan runtime dirs when free space drops below this threshold. |

@@ -73,11 +73,11 @@ def _execute(payload, *, progress, request_id, **patches):
         with ExitStack() as stack:
             if "Driver" in patches:
                 stack.enter_context(
-                    patch("app.engine.browser_tier.Driver", patches["Driver"])
+                    patch("botasaurus.browser.Driver", patches["Driver"])
                 )
             if "Request" in patches:
                 stack.enter_context(
-                    patch("app.engine.request_tier.Request", patches["Request"])
+                    patch("botasaurus.request.Request", patches["Request"])
                 )
             return engine.execute(payload, request_id=request_id, progress=progress)
 

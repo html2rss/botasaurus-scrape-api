@@ -103,7 +103,7 @@ class RequestSchemaTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("app.engine.browser_tier.Driver", FakeDriver):
+            with patch("botasaurus.browser.Driver", FakeDriver):
                 result = engine.execute(payload)
 
         self.assertIsNone(result.error if isinstance(result, ScrapeError) else None)
@@ -126,7 +126,7 @@ class RequestSchemaTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("app.engine.request_tier.Request", FakeRequest):
+            with patch("botasaurus.request.Request", FakeRequest):
                 result = engine.execute(payload)
 
         self.assertIsInstance(result, ScrapeSuccess)
@@ -155,7 +155,7 @@ class RequestSchemaTests(unittest.TestCase):
         payload = ScrapeRequest(url="https://example.com", execution_mode="request")
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("app.engine.request_tier.Request", FakeRequest):
+            with patch("botasaurus.request.Request", FakeRequest):
                 result = engine.execute(payload)
 
         self.assertEqual(result.html, html)
@@ -176,8 +176,8 @@ class RequestSchemaTests(unittest.TestCase):
                         settings=get_settings(), runtime_root=Path(tmp)
                     )
                     with (
-                        patch("app.engine.request_tier.Request", FakeRequest),
-                        patch("app.engine.browser_tier.Driver", ArticleDriver),
+                        patch("botasaurus.request.Request", FakeRequest),
+                        patch("botasaurus.browser.Driver", ArticleDriver),
                     ):
                         result = engine.execute(payload)
 
@@ -230,7 +230,7 @@ class RequestSchemaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
-            with patch("app.engine.browser_tier.Driver", FakeDriver):
+            with patch("botasaurus.browser.Driver", FakeDriver):
                 result = engine.execute(payload)
 
             self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
@@ -254,7 +254,7 @@ class RequestSchemaTests(unittest.TestCase):
                 raise OSError(28, "No space left on device")
 
             with (
-                patch("app.engine.browser_tier.Driver", FakeDriver),
+                patch("botasaurus.browser.Driver", FakeDriver),
                 patch.object(Path, "mkdir", side_effect=boom_mkdir),
             ):
                 result = engine.execute(payload)
@@ -279,7 +279,7 @@ class RequestSchemaTests(unittest.TestCase):
             (orphan / "profile").mkdir()
 
             engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
-            with patch("app.engine.browser_tier.Driver", FakeDriver):
+            with patch("botasaurus.browser.Driver", FakeDriver):
                 result = engine.execute(payload)
 
             self.assertIsInstance(result, ScrapeSuccess)
@@ -308,7 +308,7 @@ class RequestSchemaTests(unittest.TestCase):
             (orphan / "profile").mkdir()
 
             engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
-            with patch("app.engine.request_tier.Request", FakeRequest):
+            with patch("botasaurus.request.Request", FakeRequest):
                 result = engine.execute(payload)
 
             self.assertEqual(result.html, html)
@@ -333,7 +333,7 @@ class RequestSchemaTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp)
             engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
-            with patch("app.engine.browser_tier.Driver", CaptureDriver):
+            with patch("botasaurus.browser.Driver", CaptureDriver):
                 result = engine.execute(payload)
 
         self.assertIsInstance(result, ScrapeSuccess)

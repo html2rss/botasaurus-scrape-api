@@ -69,7 +69,7 @@ class IsolationRegressionTests(unittest.TestCase):
                     headers={"X-Request-Id": self.INBOUND_ID_B},
                 )
             )
-            with patch("app.engine.request_tier.Request") as mock_request:
+            with patch("botasaurus.request.Request") as mock_request:
                 mock_request.return_value.get.return_value = type(
                     "Resp",
                     (),
@@ -109,7 +109,7 @@ class IsolationRegressionTests(unittest.TestCase):
         with (
             patch.object(ScrapeSession, "__enter__", slow_enter),
             test_client() as client,
-            patch("app.engine.request_tier.Request") as mock_request,
+            patch("botasaurus.request.Request") as mock_request,
         ):
             mock_request.return_value.get.return_value = type(
                 "Resp",
@@ -162,7 +162,7 @@ class IsolationRegressionTests(unittest.TestCase):
         with (
             patch.object(ScrapeSession, "__exit__", capture_exit),
             test_client() as client,
-            patch("app.engine.request_tier.Request") as mock_request,
+            patch("botasaurus.request.Request") as mock_request,
         ):
             mock_request.return_value.get.return_value = type(
                 "Resp",

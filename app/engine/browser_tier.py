@@ -5,12 +5,11 @@ from __future__ import annotations
 import errno
 import logging
 import time
+from typing import Any
 from urllib.parse import urlparse
 
-from botasaurus.browser import Driver
-
 from app.config import Settings
-from app.engine.driver_capabilities import call_if_available
+from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.engine.envelope import build_error, build_success
 from app.engine.request_tier import remaining_total_seconds
 from app.engine.session import ScrapeSession
@@ -22,8 +21,8 @@ from app.engine.strategies import (
     resolve_strategies,
     wait_for_readiness,
 )
-from app.infra.detector import ChallengeDetector
-from app.infra.metadata import MetadataExtractor
+from app.infra.detector import ChallengeAssessment, ChallengeDetector
+from app.infra.metadata import MetadataExtractor, MetadataResult
 from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
@@ -56,6 +55,20 @@ def is_timeout_exception(exc: Exception) -> bool:
     return "timeout" in str(exc).lower()
 
 
+def collect_page_state(
+    driver: DriverProtocol,
+    target_url: str,
+    collector: XhrCollector,
+    *,
+    include_xhr: bool = True,
+) -> tuple[str, MetadataResult, ChallengeAssessment, list[dict[str, Any]]]:
+    xhr_responses = harvest_xhr(collector, driver) if include_xhr else []
+    html = driver.page_html or ""
+    meta = MetadataExtractor.fetch(driver, target_url)
+    assessment = ChallengeDetector.detect(html, meta.status_code, driver=driver)
+    return html, meta, assessment, xhr_responses
+
+
 def run_browser_tier(
     payload: ScrapeRequest,
     session: ScrapeSession,
@@ -64,6 +77,8 @@ def run_browser_tier(
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError:
+    from botasaurus.browser import Driver
+
     target_url = str(payload.url)
     request_id = session.request_id
     progress.mark(
@@ -141,21 +156,22 @@ def run_browser_tier(
             if payload.scroll:
                 apply_scrolling(session.driver)
 
-            xhr_responses = harvest_xhr(collector, session.driver)
-
-            html = session.driver.page_html or ""
-            meta = MetadataExtractor.fetch(session.driver, target_url)
-            assessment = ChallengeDetector.detect(
-                html, meta.status_code, driver=session.driver
+            html, meta, assessment, xhr_responses = collect_page_state(
+                session.driver,
+                target_url,
+                collector,
+                include_xhr=False,
             )
 
             if assessment.challenge_detected or assessment.blocked_detected:
                 call_if_available(session.driver, "bypass_cloudflare")
-                html = session.driver.page_html or ""
-                meta = MetadataExtractor.fetch(session.driver, target_url)
-                assessment = ChallengeDetector.detect(
-                    html, meta.status_code, driver=session.driver
+                html, meta, assessment, xhr_responses = collect_page_state(
+                    session.driver,
+                    target_url,
+                    collector,
+                    include_xhr=True,
                 )
+            else:
                 xhr_responses = harvest_xhr(collector, session.driver)
 
             if assessment.challenge_detected or assessment.blocked_detected:

@@ -50,7 +50,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with (
-                patch("app.engine.browser_tier.Driver", _NavigateCaptureDriver),
+                patch("botasaurus.browser.Driver", _NavigateCaptureDriver),
                 patch(
                     "app.engine.browser_tier.time.monotonic",
                     side_effect=monotonic_values,
