@@ -33,6 +33,9 @@ class ScrapeSession:
         except OSError as exc:
             if exc.errno != errno.ENOSPC:
                 raise
+            # Drop any partially created dirs so the retry can recreate them
+            # with exist_ok=False after the prune pass frees space.
+            shutil.rmtree(self.runtime_dir, ignore_errors=True)
             self.engine.prune_runtime_dirs()
             self._make_dirs()
 
