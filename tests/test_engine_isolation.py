@@ -196,3 +196,6 @@ class IsolationRegressionTests(unittest.TestCase):
             finally:
                 engine.unregister_request_id(request_id)
             self.assertNotIn(request_id, engine._active_request_ids)
+
+
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false

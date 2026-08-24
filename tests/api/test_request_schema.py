@@ -1,3 +1,4 @@
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import tempfile
 import unittest
 from pathlib import Path
@@ -21,8 +22,9 @@ from app.schemas.enums import (
     ExecutionTier,
     NavigationMode,
 )
-from app.schemas.request import ScrapeRequest, WindowSize
+from app.schemas.request import WindowSize
 from app.schemas.response import ScrapeError, ScrapeSuccess
+from tests.support.factories import scrape_request
 from tests.support.fakes import (
     ArticleDriver,
     CaptureDriver,
@@ -34,7 +36,7 @@ from tests.support.fakes import (
 
 class RequestSchemaTests(unittest.TestCase):
     def test_request_defaults(self):
-        payload = ScrapeRequest(url="https://example.com")
+        payload = scrape_request()
         self.assertEqual(payload.execution_mode, ExecutionMode.AUTO)
         self.assertEqual(payload.navigation_mode, NavigationMode.AUTO)
         self.assertEqual(payload.max_retries, 2)
@@ -53,19 +55,19 @@ class RequestSchemaTests(unittest.TestCase):
         self.assertIsNone(payload.proxy)
 
     def test_scroll_parameters(self):
-        req_scroll = ScrapeRequest(url="https://example.com", scroll=True)
+        req_scroll = scrape_request(scroll=True)
         self.assertTrue(req_scroll.scroll)
-        self.assertFalse(ScrapeRequest(url="https://example.com").scroll)
+        self.assertFalse(scrape_request().scroll)
 
     def test_window_size_validation_requires_object(self):
         with self.assertRaises(ValidationError):
-            ScrapeRequest(url="https://example.com", window_size=[1920, 1080])
+            scrape_request(window_size=[1920, 1080])
         with self.assertRaises(ValidationError):
-            ScrapeRequest(url="https://example.com", window_size={"width": 1920})
+            scrape_request(window_size={"width": 1920})
 
     def test_wait_timeout_seconds_clamps_above_work_cap(self):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
-            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=35)
+            payload = scrape_request(wait_timeout_seconds=35)
 
         settings = get_settings()
         self.assertEqual(
@@ -81,7 +83,7 @@ class RequestSchemaTests(unittest.TestCase):
 
     def test_wait_timeout_seconds_clamps_below_one(self):
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
-            payload = ScrapeRequest(url="https://example.com", wait_timeout_seconds=0)
+            payload = scrape_request(wait_timeout_seconds=0)
 
         self.assertEqual(payload.wait_timeout_seconds, 1)
         log_text = "\n".join(captured.output)
@@ -90,8 +92,7 @@ class RequestSchemaTests(unittest.TestCase):
         self.assertIn("to=1", log_text)
 
     def test_clamped_wait_timeout_allows_execute(self):
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
@@ -119,8 +120,7 @@ class RequestSchemaTests(unittest.TestCase):
             headers={"content-type": "application/octet-stream"},
             url="https://example.com/",
         )
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="request",
         )
 
@@ -152,7 +152,7 @@ class RequestSchemaTests(unittest.TestCase):
             headers={"content-type": "text/html"},
             url="https://example.com/",
         )
-        payload = ScrapeRequest(url="https://example.com", execution_mode="request")
+        payload = scrape_request(execution_mode="request")
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with patch("botasaurus.request.Request", FakeRequest):
@@ -162,7 +162,7 @@ class RequestSchemaTests(unittest.TestCase):
         self.assertEqual(result.headers["content-type"], "text/html; charset=utf-8")
 
     def test_request_tier_blocked_status_escalates_to_browser(self):
-        payload = ScrapeRequest(url="https://example.com")
+        payload = scrape_request()
         for status in (401, 403, 429):
             with self.subTest(status=status):
                 FakeRequest.response = FakeHttpResponse(
@@ -218,8 +218,7 @@ class RequestSchemaTests(unittest.TestCase):
         )
 
     def test_cleanup_runs_on_navigation_error(self):
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
@@ -237,8 +236,7 @@ class RequestSchemaTests(unittest.TestCase):
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_prepare_profile_dirs_enospc_returns_navigation_error(self):
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
@@ -265,8 +263,7 @@ class RequestSchemaTests(unittest.TestCase):
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_prune_orphan_runtime_dirs_before_new_request(self):
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
@@ -289,8 +286,7 @@ class RequestSchemaTests(unittest.TestCase):
             )
 
     def test_prune_orphan_runtime_dirs_before_http_request(self):
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="request",
         )
         html = "<html><body><h1>Example Domain</h1></body></html>"
@@ -317,8 +313,7 @@ class RequestSchemaTests(unittest.TestCase):
 
     def test_run_scrape_forwards_driver_kwargs(self):
         CaptureDriver.last_init_kwargs = None
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             block_images=True,
             block_images_and_css=True,

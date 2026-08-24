@@ -1,3 +1,4 @@
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import unittest
 
 from tests.support.fakes import (
@@ -46,10 +47,10 @@ class XhrCollectorTests(unittest.TestCase):
         )
         results = self.collector.harvest(tab)
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["url"], "https://api.example.com/feed")
-        self.assertEqual(results[0]["status_code"], 200)
-        self.assertEqual(results[0]["headers"], {"content-type": "application/json"})
-        self.assertIn("items", results[0]["body"])
+        self.assertEqual(results[0].url, "https://api.example.com/feed")
+        self.assertEqual(results[0].status_code, 200)
+        self.assertEqual(results[0].headers, {"content-type": "application/json"})
+        self.assertIn("items", results[0].body)
 
     def test_skips_non_json_mime(self):
         tab = FakeTab()
@@ -107,7 +108,7 @@ class XhrCollectorTests(unittest.TestCase):
         for i in range(5):
             self._drive_json(tab, str(i), f"https://api.example.com/chunk/{i}", chunk)
         results = self.collector.harvest(tab)
-        total = sum(len(entry["body"].encode("utf-8")) for entry in results)
+        total = sum(len(entry.body.encode("utf-8")) for entry in results)
         self.assertLessEqual(total, self.XhrCollector.MAX_AGGREGATE_BYTES)
         self.assertEqual(len(results), 4)
         self.assertLess(len(results), 5)
@@ -135,11 +136,11 @@ class XhrCollectorTests(unittest.TestCase):
         results = self.collector.harvest(tab)
         self.assertEqual(len(results), 1)
         self.assertEqual(
-            results[0]["headers"],
+            results[0].headers,
             {"content-type": "application/json; charset=utf-8"},
         )
-        self.assertNotIn("Set-Cookie", results[0]["headers"])
-        self.assertNotIn("set-cookie", results[0]["headers"])
+        self.assertNotIn("Set-Cookie", results[0].headers)
+        self.assertNotIn("set-cookie", results[0].headers)
 
     def test_reset_clears_pending_ready_and_collected(self):
         tab = FakeTab()
@@ -158,5 +159,5 @@ class XhrCollectorTests(unittest.TestCase):
         )
         second = self.collector.harvest(tab)
         self.assertEqual(len(second), 1)
-        self.assertEqual(second[0]["body"], '{"from":"success-attempt"}')
-        self.assertNotIn("failed-attempt", second[0]["body"])
+        self.assertEqual(second[0].body, '{"from":"success-attempt"}')
+        self.assertNotIn("failed-attempt", second[0].body)

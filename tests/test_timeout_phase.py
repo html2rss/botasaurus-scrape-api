@@ -1,4 +1,5 @@
 # tests/test_timeout_phase.py
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 from __future__ import annotations
 
 import tempfile
@@ -13,8 +14,17 @@ from app.config import get_settings
 from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
 from app.infra.scrape_progress import ScrapeProgress
-from app.schemas.enums import ExecutionMode, ExecutionTier, NavigationMode, TimeoutPhase
+from app.schemas.enums import (
+    ErrorCategory,
+    ExecutionMode,
+    ExecutionTier,
+    NavigationMode,
+    TimeoutPhase,
+)
 from app.schemas.request import ScrapeRequest
+from app.schemas.response import ScrapeError
+from tests.support.factories import scrape_request
+from tests.support.http import ExecuteSideEffect, test_client
 
 _URL = "https://example.com"
 _HTML = "<html><body><h1>Example Domain</h1></body></html>"
@@ -147,8 +157,7 @@ class EngineProgressMarkTests(unittest.TestCase):
     def test_execute_queue_timeout_sets_phase(self):
         progress = ScrapeProgress()
         result = ScraperEngine(settings=get_settings()).execute(
-            ScrapeRequest(
-                url=_URL,
+            scrape_request(
                 execution_mode=ExecutionMode.BROWSER,
                 navigation_mode=NavigationMode.GET,
             ),
@@ -165,8 +174,7 @@ class EngineProgressMarkTests(unittest.TestCase):
         _PhaseProbeDriver.progress = progress
         _PhaseProbeDriver.construction_phase = None
         result = _execute(
-            ScrapeRequest(
-                url=_URL,
+            scrape_request(
                 execution_mode=ExecutionMode.BROWSER,
                 navigation_mode=NavigationMode.GET,
                 max_retries=0,
@@ -189,7 +197,7 @@ class EngineProgressMarkTests(unittest.TestCase):
     def test_request_tier_marks_work_with_attempt(self):
         progress = ScrapeProgress()
         result = _execute(
-            ScrapeRequest(url=_URL, execution_mode=ExecutionMode.REQUEST),
+            scrape_request(url=_URL, execution_mode=ExecutionMode.REQUEST),
             progress=progress,
             request_id="req-http-mark",
             Request=_fake_request_cls(),
@@ -213,7 +221,7 @@ class EngineProgressMarkTests(unittest.TestCase):
 
         progress = ScrapeProgress()
         result = _execute(
-            ScrapeRequest(url=_URL, execution_mode=ExecutionMode.REQUEST),
+            scrape_request(url=_URL, execution_mode=ExecutionMode.REQUEST),
             progress=progress,
             request_id="req-http-timeout",
             Request=BoomRequest,
@@ -231,8 +239,7 @@ class EngineProgressMarkTests(unittest.TestCase):
         progress = ScrapeProgress()
         BoomDriver.progress = progress
         result = _execute(
-            ScrapeRequest(
-                url=_URL,
+            scrape_request(
                 execution_mode=ExecutionMode.BROWSER,
                 navigation_mode=NavigationMode.GET,
                 max_retries=0,
@@ -248,13 +255,32 @@ class EngineProgressMarkTests(unittest.TestCase):
 
 class HandlerTimeoutHttpTests(unittest.TestCase):
     def test_scrape_handler_timeout_uses_progress(self):
-        from tests.support.http import test_client
-
-        def fake_execute(_payload, _deadline=None, *, request_id=None, progress=None):
+        def fake_execute(
+            payload: ScrapeRequest,
+            deadline_monotonic: float | None = None,
+            *,
+            request_id: str | None = None,
+            progress: ScrapeProgress | None = None,
+        ) -> ScrapeError:
+            del payload, deadline_monotonic, request_id
             assert progress is not None
             progress.mark(
                 TimeoutPhase.BOOT, execution_tier=ExecutionTier.BROWSER_DRIVER
             )
+            return ScrapeError(
+                url=_URL,
+                error="unused",
+                error_category=ErrorCategory.TIMEOUT,
+                diagnostics=ScrapeService.build_timeout_error(
+                    _URL,
+                    request_id="unused",
+                    started_monotonic=time.monotonic(),
+                    progress=progress,
+                    timeout_seconds=45,
+                ).diagnostics,
+            )
+
+        side_effect: ExecuteSideEffect = fake_execute
 
         async def boom(awaitable, timeout=None):
             del timeout
@@ -262,7 +288,7 @@ class HandlerTimeoutHttpTests(unittest.TestCase):
             raise TimeoutError
 
         with (
-            test_client(execute_side_effect=fake_execute) as client,
+            test_client(execute_side_effect=side_effect) as client,
             patch("asyncio.wait_for", side_effect=boom),
         ):
             response = client.post(

@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.deps import ScrapeServiceDep, resolve_scrape_request_id
 from app.api.errors import json_response
-from app.api.openapi import SCRAPE_ERROR_RESPONSES, SCRAPE_SUCCESS_RESPONSE
+from app.api.openapi import get_scrape_error_responses, get_scrape_success_response
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeSuccess
 
@@ -19,7 +19,7 @@ router = APIRouter(tags=["scrape"])
 @router.post(
     "/scrape",
     response_model=ScrapeSuccess,
-    responses={**SCRAPE_SUCCESS_RESPONSE, **SCRAPE_ERROR_RESPONSES},
+    responses={**get_scrape_success_response(), **get_scrape_error_responses()},
     operation_id="scrape-url",
     summary="Scrape a URL",
     description=(

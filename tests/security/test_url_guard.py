@@ -1,3 +1,4 @@
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import ipaddress
 import unittest
 
@@ -9,7 +10,9 @@ class UrlGuardUnitTests(unittest.TestCase):
         res = UrlGuard.validate("ftp://example.com/file")
         self.assertFalse(res.is_allowed)
         self.assertEqual(res.status_code, 400)
-        self.assertIn("Only http/https", res.error_message)
+        error_message = res.error_message
+        assert error_message is not None
+        self.assertIn("Only http/https", error_message)
 
     def test_validate_rejects_missing_hostname(self):
         res = UrlGuard.validate("http://")
@@ -25,7 +28,9 @@ class UrlGuardUnitTests(unittest.TestCase):
         res = UrlGuard.validate_proxy("http://127.0.0.1:8080")
         self.assertFalse(res.is_allowed)
         self.assertEqual(res.status_code, 403)
-        self.assertIn("Proxy URL is invalid or blocked", res.error_message)
+        error_message = res.error_message
+        assert error_message is not None
+        self.assertIn("Proxy URL is invalid or blocked", error_message)
 
     def test_is_blocked_ip_allows_well_known_nat64_prefix(self):
         nat64_ip = ipaddress.ip_address("64:ff9b::3691:8e03")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -15,6 +16,9 @@ from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess
 
 logger = logging.getLogger("botasaurus_scrape_api")
+
+if TYPE_CHECKING:
+    from botasaurus.request import HttpResponse
 
 
 def remaining_total_seconds(settings: Settings, started_monotonic: float) -> int:
@@ -46,6 +50,7 @@ def run_request_tier(
     proxies = {"http": payload.proxy, "https": payload.proxy} if payload.proxy else None
 
     req = Request()
+    resp: HttpResponse | None = None
     try:
         resp = req.get(
             target_url,
@@ -61,11 +66,9 @@ def run_request_tier(
         html = resp.text or ""
         status_code = int(resp.status_code) if resp.status_code is not None else 200
         headers_dict = (
-            {str(k): str(v) for k, v in resp.headers.items()}
-            if getattr(resp, "headers", None)
-            else None
+            {str(k): str(v) for k, v in resp.headers.items()} if resp.headers else None
         )
-        final_url = str(resp.url) if getattr(resp, "url", None) else target_url
+        final_url = resp.url or target_url
 
         assessment = ChallengeDetector.detect(html, status_code)
         render_ms = int((time.monotonic() - started_monotonic) * 1000)

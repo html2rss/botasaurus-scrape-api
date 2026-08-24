@@ -615,8 +615,6 @@ components:
           title: Xhr Responses
           description: JSON XHR/fetch sub-resource bodies captured on the browser
             tier (empty on the HTTP-request tier).
-          examples:
-          - []
         diagnostics:
           $ref: '#/components/schemas/ScrapeDiagnostics'
           description: Per-request tracing, strategy, timing, and challenge signals.

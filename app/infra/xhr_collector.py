@@ -11,7 +11,11 @@ from __future__ import annotations
 import base64
 import logging
 import threading
-from typing import Any
+from typing import cast
+
+from app.engine.driver_capabilities import CdpTabProtocol
+from app.infra.cdp_types import PendingXhrMeta
+from app.schemas.response import XhrResponse
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -27,12 +31,12 @@ class XhrCollector:
 
     def __init__(self, target_url: str) -> None:
         self._target_url = str(target_url).rstrip("/")
-        self._pending: dict[str, dict[str, Any]] = {}
+        self._pending: dict[str, PendingXhrMeta] = {}
         self._ready_ids: list[str] = []
-        self._collected: list[dict[str, Any]] = []
+        self._collected: list[XhrResponse] = []
         self._lock = threading.Lock()
 
-    def install(self, tab: Any) -> None:
+    def install(self, tab: CdpTabProtocol) -> None:
         """Enable the network domain and register handlers before navigation."""
         from botasaurus_driver import cdp
         from botasaurus_driver.core.custom_storage_cdp import enable_network
@@ -49,39 +53,48 @@ class XhrCollector:
             self._collected.clear()
 
     @classmethod
-    def _allowlisted_headers(cls, headers: Any) -> dict[str, str]:
+    def _allowlisted_headers(cls, headers: object) -> dict[str, str]:
         """Keep only content-type; drop Set-Cookie and other headers."""
         allowed: dict[str, str] = {}
-        for key, value in dict(headers or {}).items():
+        header_map = cast(
+            dict[object, object], headers if isinstance(headers, dict) else {}
+        )
+        for key, value in header_map.items():
             normalized = str(key).lower()
             if normalized in cls._HEADER_ALLOWLIST:
                 allowed[normalized] = str(value)
         return allowed
 
-    def _on_response(self, request_id: Any, response: Any, _event: Any) -> None:
-        url = str(response.url)
+    def _on_response(
+        self, request_id: object, response: object, _event: object
+    ) -> None:
+        url = str(getattr(response, "url", ""))
         if url.rstrip("/") == self._target_url:
             return
-        if "json" not in (response.mime_type or "").lower():
+        mime_type = str(getattr(response, "mime_type", "") or "")
+        if "json" not in mime_type.lower():
             return
         with self._lock:
             if len(self._collected) + len(self._pending) >= self.MAX_RESPONSES:
                 return
-            self._pending[str(request_id)] = {
-                "url": url,
-                "status_code": int(response.status),
-                "headers": self._allowlisted_headers(response.headers),
-                "request_id": request_id,
-            }
+            stored_request_id = (
+                request_id if isinstance(request_id, (str, int)) else str(request_id)
+            )
+            self._pending[str(request_id)] = PendingXhrMeta(
+                url=url,
+                status_code=int(getattr(response, "status", 0)),
+                headers=self._allowlisted_headers(getattr(response, "headers", {})),
+                request_id=stored_request_id,
+            )
 
-    def _on_finished(self, event: Any) -> None:
+    def _on_finished(self, event: object) -> None:
         # Do not call get_response_body here — CDP deadlocks (Phase 0 spike).
-        rid = str(event.request_id)
+        rid = str(getattr(event, "request_id", ""))
         with self._lock:
             if rid in self._pending and rid not in self._ready_ids:
                 self._ready_ids.append(rid)
 
-    def harvest(self, tab: Any) -> list[dict[str, Any]]:
+    def harvest(self, tab: CdpTabProtocol) -> list[XhrResponse]:
         """Fetch bodies for finished responses on the caller thread."""
         with self._lock:
             ready = list(self._ready_ids)
@@ -90,21 +103,25 @@ class XhrCollector:
                 (rid, self._pending.pop(rid)) for rid in ready if rid in self._pending
             ]
             aggregate_bytes = sum(
-                len(entry["body"].encode("utf-8")) for entry in self._collected
+                len(entry.body.encode("utf-8")) for entry in self._collected
             )
 
         for rid, meta in jobs:
-            request_id = meta.pop("request_id")
-            body = self._fetch_body(tab, request_id, rid)
+            request_id = meta.pop("request_id", rid)
+            if isinstance(request_id, int):
+                normalized_request_id = request_id
+            else:
+                normalized_request_id = request_id or rid
+            body = self._fetch_body(tab, normalized_request_id, rid)
             if body is None:
                 continue
             body_bytes = len(body.encode("utf-8"))
-            entry = {
-                "url": meta["url"],
-                "status_code": meta["status_code"],
-                "headers": meta["headers"],
-                "body": body,
-            }
+            entry = XhrResponse(
+                url=meta["url"],
+                status_code=meta["status_code"],
+                headers=meta["headers"],
+                body=body,
+            )
             with self._lock:
                 if len(self._collected) >= self.MAX_RESPONSES:
                     break
@@ -115,7 +132,9 @@ class XhrCollector:
 
         return self.results()
 
-    def _fetch_body(self, tab: Any, request_id: Any, rid: str) -> str | None:
+    def _fetch_body(
+        self, tab: CdpTabProtocol, request_id: str | int, rid: str
+    ) -> str | None:
         from botasaurus_driver import cdp
 
         try:
@@ -128,7 +147,9 @@ class XhrCollector:
 
         if b64:
             try:
-                body = base64.b64decode(body).decode("utf-8", errors="replace")
+                body = base64.b64decode(cast(str, body)).decode(
+                    "utf-8", errors="replace"
+                )
             except Exception as exc:
                 logger.debug(
                     "xhr_body_base64_decode_failed request_id=%s error=%s", rid, exc
@@ -141,6 +162,6 @@ class XhrCollector:
             return None
         return body
 
-    def results(self) -> list[dict[str, Any]]:
+    def results(self) -> list[XhrResponse]:
         with self._lock:
             return list(self._collected)

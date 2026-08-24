@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Protocol, TypedDict, cast
 
 from app.config import SentrySettings, Settings
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
-_INITIALIZED = False
+_initialized = False
+
+
+class SentryEventHint(TypedDict, total=False):
+    log_record: object
+
+
+class SentryEvent(TypedDict, total=False):
+    tags: dict[str, str]
+    logger: str
+    logentry: dict[str, str]
+    message: str
+
+
+class SentryBeforeSend(Protocol):
+    def __call__(
+        self, event: SentryEvent, hint: SentryEventHint
+    ) -> SentryEvent | None: ...
 
 
 def is_sentry_enabled(settings: Settings | None = None) -> bool:
@@ -19,10 +36,10 @@ def is_sentry_enabled(settings: Settings | None = None) -> bool:
 
 def sentry_is_ready() -> bool:
     """Return True when Sentry DSN is set and init succeeded."""
-    return is_sentry_enabled() and _INITIALIZED
+    return is_sentry_enabled() and _initialized
 
 
-def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | None:
     tags = event.get("tags") or {}
     if tags.get("error_category") == "challenge_block":
         return None
@@ -42,7 +59,7 @@ def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] 
 
 def setup_sentry(settings: Settings | None = None) -> bool:
     """Initialize Sentry when SENTRY_DSN is set. Returns True on success."""
-    global _INITIALIZED
+    global _initialized
 
     from app.config import get_settings
 
@@ -51,7 +68,7 @@ def setup_sentry(settings: Settings | None = None) -> bool:
 
 
 def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> bool:
-    global _INITIALIZED
+    global _initialized
 
     dsn = sentry.dsn.strip()
     if not dsn:
@@ -79,7 +96,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
             FastApiIntegration(),
             StarletteIntegration(),
         ],
-        "before_send": _before_send,
+        "before_send": cast(SentryBeforeSend, _before_send),
     }
 
     if sentry.release.strip():
@@ -88,7 +105,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         init_kwargs["profiles_sample_rate"] = profiles_sample_rate
 
     sentry_sdk.init(**init_kwargs)
-    _INITIALIZED = True
+    _initialized = True
 
     logger.info(
         "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
@@ -100,7 +117,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
 
 
 def flush_sentry(timeout: float = 2.0) -> None:
-    if not _INITIALIZED:
+    if not _initialized:
         return
     try:
         import sentry_sdk

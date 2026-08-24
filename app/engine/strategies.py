@@ -13,6 +13,7 @@ from app.engine.driver_capabilities import (
 from app.infra.xhr_collector import XhrCollector
 from app.schemas.enums import NavigationMode
 from app.schemas.request import ScrapeRequest
+from app.schemas.response import XhrResponse
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -152,9 +153,7 @@ def apply_scrolling(driver: DriverProtocol) -> None:
         call_quietly(driver, "sleep", 0.5)
 
 
-def harvest_xhr(
-    collector: XhrCollector, driver: DriverProtocol
-) -> list[dict[str, Any]]:
+def harvest_xhr(collector: XhrCollector, driver: DriverProtocol) -> list[XhrResponse]:
     tab = getattr(driver, "_tab", None)
     if tab is None:
         return collector.results()

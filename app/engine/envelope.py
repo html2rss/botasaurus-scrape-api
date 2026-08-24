@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from app.infra.detector import ChallengeAssessment
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.response import (
@@ -20,8 +18,6 @@ HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
 def utf8_normalize_html(html: str) -> str:
     if not html:
         return html
-    if not isinstance(html, str):
-        html = str(html)
     try:
         html = html.encode("latin-1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):  # fmt: skip
@@ -86,7 +82,7 @@ def build_success(
     headers: dict[str, str] | None = None,
     metadata_error: str | None = None,
     assessment: ChallengeAssessment | None = None,
-    xhr_responses: list[dict[str, Any]] | list[XhrResponse] | None = None,
+    xhr_responses: list[XhrResponse] | None = None,
 ) -> ScrapeSuccess:
     html, headers = html_document_headers(html, headers)
     return ScrapeSuccess(
@@ -96,7 +92,7 @@ def build_success(
         headers=headers,
         html=html,
         metadata_error=metadata_error,
-        xhr_responses=cast(list[XhrResponse], xhr_responses or []),
+        xhr_responses=xhr_responses or [],
         diagnostics=build_diagnostics(
             request_id=request_id,
             attempts=attempts,

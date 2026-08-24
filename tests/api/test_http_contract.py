@@ -1,34 +1,45 @@
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import unittest
 
 from app.config import get_settings
 from app.engine import (
     ScraperEngine,
 )
+from app.infra.scrape_progress import ScrapeProgress
 from app.schemas.enums import (
     ExecutionTier,
 )
+from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeDiagnostics, ScrapeSuccess
+from tests.support.http import ExecuteSideEffect, test_client
 
 
 class RequestIdContractTests(unittest.TestCase):
     INBOUND_ID = "550e8400-e29b-41d4-a716-446655440000"
 
     def test_honored_request_id_on_200(self):
-        from tests.support.http import test_client
-
-        def fake_execute(payload, _deadline=None, *, request_id=None, progress=None):
+        def fake_execute(
+            payload: ScrapeRequest,
+            deadline_monotonic: float | None = None,
+            *,
+            request_id: str | None = None,
+            progress: ScrapeProgress | None = None,
+        ) -> ScrapeSuccess:
+            del deadline_monotonic, progress
+            resolved_request_id = request_id or "req-unknown"
             return ScrapeSuccess(
                 url=str(payload.url),
                 html="<html></html>",
                 diagnostics=ScrapeDiagnostics(
-                    request_id=request_id,
+                    request_id=resolved_request_id,
                     attempts=1,
                     render_ms=1,
                     execution_tier=ExecutionTier.HTTP_REQUEST,
                 ),
             )
 
-        with test_client(execute_side_effect=fake_execute) as client:
+        side_effect: ExecuteSideEffect = fake_execute
+        with test_client(execute_side_effect=side_effect) as client:
             response = client.post(
                 "/scrape",
                 json={"url": "https://example.com"},
@@ -133,7 +144,14 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         captured: dict[str, int] = {}
 
-        def fake_execute(payload, _deadline=None, *, request_id=None, progress=None):
+        def fake_execute(
+            payload: ScrapeRequest,
+            deadline_monotonic: float | None = None,
+            *,
+            request_id: str | None = None,
+            progress: ScrapeProgress | None = None,
+        ) -> ScrapeSuccess:
+            del deadline_monotonic, progress
             captured["wait"] = payload.wait_timeout_seconds
             return ScrapeSuccess(
                 url=str(payload.url),
@@ -146,7 +164,8 @@ class SchemaValidationHttpTests(unittest.TestCase):
                 ),
             )
 
-        with test_client(execute_side_effect=fake_execute) as client:
+        side_effect: ExecuteSideEffect = fake_execute
+        with test_client(execute_side_effect=side_effect) as client:
             response = client.post(
                 "/scrape",
                 json={

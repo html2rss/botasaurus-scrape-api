@@ -33,16 +33,9 @@ ignore = [
 pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
-typeCheckingMode = "standard"
+stubPath = "typings"
+typeCheckingMode = "strict"
 include = ["app", "tests"]
 exclude = [".venv"]
-reportMissingTypeStubs = false
+reportMissingTypeStubs = true
 reportMissingImports = false
-
-[[tool.pyright.executionEnvironments]]
-root = "tests"
-reportArgumentType = "none"
-reportAttributeAccessIssue = "none"
-reportOptionalSubscript = "none"
-reportOptionalMemberAccess = "none"
-reportFunctionMemberAccess = "none"

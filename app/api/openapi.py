@@ -17,7 +17,7 @@ from app.schemas.response import ScrapeError
 @dataclass(frozen=True, slots=True)
 class OpenApiMetadata:
     api_description: str
-    json_error_example: dict[str, dict[str, dict]]
+    json_error_example: dict[str, dict[str, dict[str, Any]]]
     scrape_error_responses: dict[int | str, dict[str, Any]]
     health_responses: dict[int | str, dict[str, Any]]
     scrape_success_response: dict[int | str, dict[str, Any]]
@@ -158,38 +158,30 @@ scrape error envelope, not FastAPI `detail`.
     )
 
 
-# Populated by configure_openapi() during create_app(); route modules import these names.
-API_DESCRIPTION = ""
-JSON_ERROR_EXAMPLE: dict[str, dict[str, dict]] = {}
-SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {}
-HEALTH_RESPONSES: dict[int | str, dict[str, Any]] = {}
-SCRAPE_SUCCESS_RESPONSE: dict[int | str, dict[str, Any]] = {}
-OPENAPI_TAGS: list[dict[str, str]] = []
-SERVERS: list[dict[str, str]] = []
-CONTACT: dict[str, str] = {}
-LICENSE_INFO: dict[str, str] = {}
+_registry: OpenApiMetadata | None = None
 
 
 def configure_openapi(settings: Settings) -> OpenApiMetadata:
-    metadata = build_openapi_metadata(settings)
-    global API_DESCRIPTION, JSON_ERROR_EXAMPLE, SCRAPE_ERROR_RESPONSES
-    global HEALTH_RESPONSES, SCRAPE_SUCCESS_RESPONSE, OPENAPI_TAGS
-    global SERVERS, CONTACT, LICENSE_INFO
-    API_DESCRIPTION = metadata.api_description
-    JSON_ERROR_EXAMPLE.clear()
-    JSON_ERROR_EXAMPLE.update(metadata.json_error_example)
-    SCRAPE_ERROR_RESPONSES.clear()
-    SCRAPE_ERROR_RESPONSES.update(metadata.scrape_error_responses)
-    HEALTH_RESPONSES.clear()
-    HEALTH_RESPONSES.update(metadata.health_responses)
-    SCRAPE_SUCCESS_RESPONSE.clear()
-    SCRAPE_SUCCESS_RESPONSE.update(metadata.scrape_success_response)
-    OPENAPI_TAGS.clear()
-    OPENAPI_TAGS.extend(metadata.openapi_tags)
-    SERVERS.clear()
-    SERVERS.extend(metadata.servers)
-    CONTACT.clear()
-    CONTACT.update(metadata.contact)
-    LICENSE_INFO.clear()
-    LICENSE_INFO.update(metadata.license_info)
-    return metadata
+    global _registry
+    _registry = build_openapi_metadata(settings)
+    return _registry
+
+
+def get_openapi_metadata() -> OpenApiMetadata:
+    if _registry is None:
+        from app.config import get_settings
+
+        return configure_openapi(get_settings())
+    return _registry
+
+
+def get_scrape_error_responses() -> dict[int | str, dict[str, Any]]:
+    return get_openapi_metadata().scrape_error_responses
+
+
+def get_scrape_success_response() -> dict[int | str, dict[str, Any]]:
+    return get_openapi_metadata().scrape_success_response
+
+
+def get_health_responses() -> dict[int | str, dict[str, Any]]:
+    return get_openapi_metadata().health_responses

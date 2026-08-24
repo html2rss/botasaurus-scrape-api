@@ -1,4 +1,5 @@
 # tests/test_sentry.py
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 from __future__ import annotations
 
 import os
@@ -26,7 +27,7 @@ def env(**values: str):
 
 class SentryIntegrationTests(unittest.TestCase):
     def setUp(self):
-        sentry_mod._INITIALIZED = False
+        sentry_mod._initialized = False
         reset_settings_cache()
 
     def test_is_sentry_enabled(self):
@@ -49,7 +50,7 @@ class SentryIntegrationTests(unittest.TestCase):
         with env(SENTRY_DSN="https://key@sentry.io/123"):
             self.assertFalse(sentry_is_ready())
 
-        sentry_mod._INITIALIZED = True
+        sentry_mod._initialized = True
         with env(SENTRY_DSN="https://key@sentry.io/123"):
             self.assertTrue(sentry_is_ready())
 
@@ -61,7 +62,7 @@ class SentryIntegrationTests(unittest.TestCase):
             result = setup_sentry()
             self.assertFalse(result)
             mock_init.assert_not_called()
-            self.assertFalse(sentry_mod._INITIALIZED)
+            self.assertFalse(sentry_mod._initialized)
 
     def test_setup_sentry_noop_when_dsn_empty_or_whitespace(self):
         for val in ("", "   ", "\t\n"):
@@ -73,7 +74,7 @@ class SentryIntegrationTests(unittest.TestCase):
                 result = setup_sentry()
                 self.assertFalse(result)
                 mock_init.assert_not_called()
-                self.assertFalse(sentry_mod._INITIALIZED)
+                self.assertFalse(sentry_mod._initialized)
 
     def test_setup_sentry_initializes_with_defaults(self):
         dsn = "https://key@o123.ingest.sentry.io/456"
@@ -85,7 +86,7 @@ class SentryIntegrationTests(unittest.TestCase):
             result = setup_sentry()
 
             self.assertTrue(result)
-            self.assertTrue(sentry_mod._INITIALIZED)
+            self.assertTrue(sentry_mod._initialized)
             mock_init.assert_called_once()
             init_kwargs = mock_init.call_args.kwargs
             self.assertEqual(init_kwargs["dsn"], dsn)
@@ -136,7 +137,7 @@ class SentryIntegrationTests(unittest.TestCase):
         self.assertIsNone(dropped)
 
         kept = _before_send({"tags": {"error_category": "navigation_error"}}, {})
-        self.assertEqual(kept["tags"]["error_category"], "navigation_error")
+        self.assertEqual(kept.get("tags", {}).get("error_category"), "navigation_error")
 
     def test_before_send_drops_websocket_teardown(self):
         dropped = _before_send(
@@ -163,7 +164,7 @@ class SentryIntegrationTests(unittest.TestCase):
             init_kwargs = mock_init.call_args.kwargs
             self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
 
-        sentry_mod._INITIALIZED = False
+        sentry_mod._initialized = False
         with (
             env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="2.5"),
             patch("sentry_sdk.init") as mock_init,
@@ -180,13 +181,13 @@ class SentryIntegrationTests(unittest.TestCase):
             mock_flush.assert_not_called()
 
     def test_flush_sentry_invokes_sdk_flush_when_initialized(self):
-        sentry_mod._INITIALIZED = True
+        sentry_mod._initialized = True
         with patch("sentry_sdk.flush") as mock_flush:
             flush_sentry(timeout=3.0)
             mock_flush.assert_called_once_with(timeout=3.0)
 
     def test_flush_sentry_swallows_exceptions_cleanly(self):
-        sentry_mod._INITIALIZED = True
+        sentry_mod._initialized = True
         with patch("sentry_sdk.flush", side_effect=RuntimeError("flush timeout")):
             flush_sentry()
 
