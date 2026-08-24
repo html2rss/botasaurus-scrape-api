@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from botasaurus.browser import Driver
 
 from app.config import Settings
+from app.engine.driver_capabilities import call_if_available
 from app.engine.envelope import build_error, build_success
 from app.engine.request_tier import remaining_total_seconds
 from app.engine.session import ScrapeSession
@@ -154,20 +155,13 @@ def run_browser_tier(
             )
 
             if assessment.challenge_detected or assessment.blocked_detected:
-                bypass_fn = getattr(session.driver, "bypass_cloudflare", None)
-                if callable(bypass_fn):
-                    try:
-                        bypass_fn()
-                        html = session.driver.page_html or ""
-                        meta = MetadataExtractor.fetch(session.driver, target_url)
-                        assessment = ChallengeDetector.detect(
-                            html, meta.status_code, driver=session.driver
-                        )
-                        xhr_responses = harvest_xhr(collector, session.driver)
-                    except Exception as exc:
-                        logger.debug(
-                            "bypass_cloudflare_attempt_failed error=%s", str(exc)
-                        )
+                call_if_available(session.driver, "bypass_cloudflare")
+                html = session.driver.page_html or ""
+                meta = MetadataExtractor.fetch(session.driver, target_url)
+                assessment = ChallengeDetector.detect(
+                    html, meta.status_code, driver=session.driver
+                )
+                xhr_responses = harvest_xhr(collector, session.driver)
 
             if assessment.challenge_detected or assessment.blocked_detected:
                 logger.warning(

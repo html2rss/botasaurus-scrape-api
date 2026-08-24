@@ -5,12 +5,17 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from botasaurus.browser import Driver
-
+from app.engine.driver_capabilities import (
+    DriverProtocol,
+    call_if_available,
+    call_quietly,
+)
 from app.infra.xhr_collector import XhrCollector
 from app.schemas import NavigationMode, ScrapeRequest
 
 logger = logging.getLogger("botasaurus_scrape_api")
+
+_CAPABILITY_MISS = object()
 
 TRACKER_URL_PATTERNS: list[str] = [
     "*google-analytics.com*",
@@ -42,15 +47,24 @@ def resolve_strategies(mode: NavigationMode, max_retries: int) -> list[Navigatio
     return [mode] * max_attempts
 
 
+def _driver_method(driver: DriverProtocol, *names: str):
+    for name in names:
+        method = getattr(driver, name, None)
+        if callable(method):
+            return method
+    return driver.get
+
+
 def navigate(
-    driver: Driver, target_url: str, strategy: NavigationMode, timeout_seconds: int
+    driver: DriverProtocol,
+    target_url: str,
+    strategy: NavigationMode,
+    timeout_seconds: int,
 ) -> None:
     if strategy == NavigationMode.ORGANIC_GET:
-        method = getattr(
-            driver, "organic_get", getattr(driver, "google_get", driver.get)
-        )
+        method = _driver_method(driver, "organic_get", "google_get")
     elif strategy.value.startswith("google_get"):
-        method = getattr(driver, "google_get", driver.get)
+        method = _driver_method(driver, "google_get")
     else:
         method = driver.get
 
@@ -64,42 +78,36 @@ def navigate(
 
 
 def configure_driver(
-    driver: Driver,
+    driver: DriverProtocol,
     payload: ScrapeRequest,
     target_url: str,
     collector: XhrCollector | None = None,
 ) -> None:
-    if hasattr(driver, "_tab"):
+    tab = getattr(driver, "_tab", None)
+    if tab is not None:
         if collector is not None:
             try:
-                collector.install(driver._tab)
+                collector.install(tab)
             except Exception:
                 pass
 
         if payload.block_trackers:
-            try:
-                driver._tab.block_urls(TRACKER_URL_PATTERNS)
-            except Exception:
-                pass
+            call_quietly(tab, "block_urls", TRACKER_URL_PATTERNS)
 
     if payload.cookies:
         for c_name, c_val in payload.cookies.items():
-            try:
-                driver.add_cookies(
-                    [{"name": str(c_name), "value": str(c_val), "url": target_url}]
-                )
-            except Exception:
-                pass
+            call_quietly(
+                driver,
+                "add_cookies",
+                [{"name": str(c_name), "value": str(c_val), "url": target_url}],
+            )
 
-    if payload.headers and hasattr(driver, "_tab"):
-        try:
-            driver._tab.set_extra_http_headers(payload.headers)
-        except Exception:
-            pass
+    if payload.headers and tab is not None:
+        call_quietly(tab, "set_extra_http_headers", payload.headers)
 
 
 def wait_for_readiness(
-    driver: Driver,
+    driver: DriverProtocol,
     *,
     selector: str | None,
     timeout_seconds: int,
@@ -108,57 +116,44 @@ def wait_for_readiness(
         driver.wait_for_element(selector, wait=timeout_seconds)
         return
 
-    sleep_random_fn = getattr(driver, "sleep_random", None)
-    if callable(sleep_random_fn):
-        try:
-            sleep_random_fn(0.5, 1.2)
-            return
-        except Exception:
-            pass
+    if (
+        call_if_available(driver, "sleep_random", 0.5, 1.2, default=_CAPABILITY_MISS)
+        is not _CAPABILITY_MISS
+    ):
+        return
     driver.sleep(1)
 
 
-def apply_scrolling(driver: Driver) -> None:
-    scroll_bottom_fn = getattr(driver, "scroll_to_bottom", None)
-    scroll_fn = getattr(driver, "scroll", None)
-    run_js_fn = getattr(driver, "run_js", None)
+def apply_scrolling(driver: DriverProtocol) -> None:
+    if (
+        call_if_available(driver, "scroll_to_bottom", default=_CAPABILITY_MISS)
+        is _CAPABILITY_MISS
+        and call_if_available(driver, "scroll", default=_CAPABILITY_MISS)
+        is _CAPABILITY_MISS
+        and call_if_available(
+            driver,
+            "run_js",
+            "window.scrollTo(0, document.body.scrollHeight);",
+            default=_CAPABILITY_MISS,
+        )
+        is _CAPABILITY_MISS
+    ):
+        call_quietly(
+            driver,
+            "execute_script",
+            "window.scrollTo(0, document.body.scrollHeight);",
+        )
 
-    if callable(scroll_bottom_fn):
-        try:
-            scroll_bottom_fn()
-        except Exception:
-            pass
-    elif callable(scroll_fn):
-        try:
-            scroll_fn()
-        except Exception:
-            pass
-    elif callable(run_js_fn):
-        try:
-            run_js_fn("window.scrollTo(0, document.body.scrollHeight);")
-        except Exception:
-            pass
-    elif hasattr(driver, "execute_script"):
-        try:
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        except Exception:
-            pass
-
-    sleep_random_fn = getattr(driver, "sleep_random", None)
-    if callable(sleep_random_fn):
-        try:
-            sleep_random_fn(0.4, 0.9)
-            return
-        except Exception:
-            pass
-
-    try:
-        driver.sleep(0.5)
-    except Exception:
-        pass
+    if (
+        call_if_available(driver, "sleep_random", 0.4, 0.9, default=_CAPABILITY_MISS)
+        is _CAPABILITY_MISS
+    ):
+        call_quietly(driver, "sleep", 0.5)
 
 
-def harvest_xhr(collector: XhrCollector, driver: Driver) -> list[dict[str, Any]]:
+def harvest_xhr(
+    collector: XhrCollector, driver: DriverProtocol
+) -> list[dict[str, Any]]:
     tab = getattr(driver, "_tab", None)
     if tab is None:
         return collector.results()

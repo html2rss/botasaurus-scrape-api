@@ -6,7 +6,7 @@ import errno
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from botasaurus.browser import Driver
+from app.engine.driver_capabilities import DriverProtocol, call_quietly
 
 if TYPE_CHECKING:
     from app.engine.orchestrator import ScraperEngine
@@ -20,7 +20,7 @@ class ScrapeSession:
         self.request_id = request_id
         self.runtime_dir = engine.runtime_root / request_id
         self.profile_dir = self.runtime_dir / "profile"
-        self.driver: Driver | None = None
+        self.driver: DriverProtocol | None = None
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -45,10 +45,7 @@ class ScrapeSession:
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:
             if self.driver is not None:
-                try:
-                    self.driver.close()
-                except Exception:
-                    pass
+                call_quietly(self.driver, "close")
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
             self.engine.unregister_request_id(self.request_id)
