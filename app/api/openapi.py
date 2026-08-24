@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.config import Settings
-from app.schemas import (
+from app.api.openapi_examples import (
     HEALTH_EXAMPLE,
     SCRAPE_ERROR_EXAMPLE,
     SCRAPE_SUCCESS_EXAMPLE,
-    ScrapeError,
 )
+from app.config import Settings
+from app.schemas import ScrapeError
 
 
 @dataclass(frozen=True, slots=True)
