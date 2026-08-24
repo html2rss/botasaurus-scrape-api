@@ -533,6 +533,11 @@ class ScraperEngine:
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         request_id = session.request_id
+        if progress is not None:
+            progress.mark(
+                TimeoutPhase.BOOT,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            )
         session.prepare_profile_dirs()
 
         strategies = self.resolve_strategies(
@@ -546,11 +551,6 @@ class ScraperEngine:
             else None
         )
 
-        if progress is not None:
-            progress.mark(
-                TimeoutPhase.BOOT,
-                execution_tier=ExecutionTier.BROWSER_DRIVER,
-            )
         session.driver = Driver(
             headless=payload.headless,
             enable_xvfb_virtual_display=not payload.headless,

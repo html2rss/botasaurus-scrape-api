@@ -126,8 +126,19 @@ _SCRAPE_ERROR_RESPONSES = {
             "application/json": {
                 "example": {
                     **SCRAPE_ERROR_EXAMPLE,
-                    "error": f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} seconds",
+                    "error": (
+                        f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} "
+                        "seconds (phase=work)"
+                    ),
                     "error_category": "timeout",
+                    "diagnostics": {
+                        **SCRAPE_ERROR_EXAMPLE["diagnostics"],
+                        "attempts": 1,
+                        "strategy_used": "get",
+                        "render_ms": 45012,
+                        "execution_tier": "browser_driver",
+                        "timeout_phase": "work",
+                    },
                 }
             }
         },
