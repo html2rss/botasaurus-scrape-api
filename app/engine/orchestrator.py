@@ -9,7 +9,8 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from app.config import Settings
-from app.engine.browser_tier import is_timeout_exception, run_browser_tier
+from app.engine.browser_tier import run_browser_tier
+from app.engine.budget import elapsed_ms, is_timeout_exception
 from app.engine.envelope import build_error
 from app.engine.request_tier import run_request_tier
 from app.engine.session import ScrapeSession
@@ -124,7 +125,7 @@ class ScraperEngine:
                         str(exc),
                     )
                     if payload.execution_mode == ExecutionMode.REQUEST:
-                        render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                        render_ms = elapsed_ms(started_monotonic)
                         is_timeout = is_timeout_exception(exc)
                         return build_error(
                             target_url,

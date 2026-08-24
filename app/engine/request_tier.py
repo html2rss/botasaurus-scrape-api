@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 from app.config import Settings
+from app.engine.budget import elapsed_ms, remaining_total_seconds
 from app.engine.envelope import build_error, build_success
 from app.infra.detector import ChallengeDetector
 from app.infra.scrape_progress import ScrapeProgress
@@ -19,13 +19,6 @@ logger = get_logger()
 
 if TYPE_CHECKING:
     from botasaurus.request import HttpResponse
-
-
-def remaining_total_seconds(settings: Settings, started_monotonic: float) -> int:
-    return max(
-        1,
-        int(settings.scrape_timeout_seconds - (time.monotonic() - started_monotonic)),
-    )
 
 
 def run_request_tier(
@@ -71,7 +64,7 @@ def run_request_tier(
         final_url = resp.url or target_url
 
         assessment = ChallengeDetector.detect(html, status_code)
-        render_ms = int((time.monotonic() - started_monotonic) * 1000)
+        render_ms = elapsed_ms(started_monotonic)
 
         is_clean_success = (
             assessment.is_clean

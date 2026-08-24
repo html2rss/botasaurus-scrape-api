@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from app.config import Settings
 from app.engine import ScraperEngine
+from app.engine.budget import elapsed_ms
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.scrape_progress import ScrapeProgress
@@ -82,7 +83,7 @@ class ScrapeService:
     ) -> ScrapeError:
         snap = progress.snapshot()
         phase = snap.phase
-        render_ms = int((time.monotonic() - started_monotonic) * 1000)
+        render_ms = elapsed_ms(started_monotonic)
         return ScrapeError(
             url=url,
             error=(

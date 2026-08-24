@@ -8,9 +8,13 @@ from typing import cast
 from urllib.parse import urlparse
 
 from app.config import Settings
+from app.engine.budget import (
+    browser_step_budget_seconds,
+    elapsed_ms,
+    is_timeout_exception,
+)
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.engine.envelope import build_error, build_success
-from app.engine.request_tier import remaining_total_seconds
 from app.engine.session import ScrapeSession
 from app.engine.strategies import (
     apply_scrolling,
@@ -32,40 +36,32 @@ from app.schemas.response import ScrapeError, ScrapeSuccess, XhrResponse
 logger = get_logger()
 
 
-def remaining_work_seconds(settings: Settings, browser_ready_monotonic: float) -> int:
-    return max(
-        1,
-        int(
-            settings.scrape_work_timeout_seconds
-            - (time.monotonic() - browser_ready_monotonic)
-        ),
-    )
-
-
-def browser_step_budget_seconds(
-    settings: Settings, started_monotonic: float, browser_ready_monotonic: float
-) -> int:
-    return min(
-        remaining_total_seconds(settings, started_monotonic),
-        remaining_work_seconds(settings, browser_ready_monotonic),
-    )
-
-
-def is_timeout_exception(exc: Exception) -> bool:
-    return "timeout" in str(exc).lower()
-
-
-def collect_page_state(
-    driver: DriverProtocol,
-    target_url: str,
-    collector: XhrCollector,
-    *,
-    include_xhr: bool = True,
-) -> tuple[str, MetadataResult, ChallengeAssessment, list[XhrResponse]]:
-    xhr_responses = harvest_xhr(collector, driver) if include_xhr else []
+def _page_state(
+    driver: DriverProtocol, target_url: str
+) -> tuple[str, MetadataResult, ChallengeAssessment]:
     html = driver.page_html or ""
     meta = MetadataExtractor.fetch(driver, target_url)
     assessment = ChallengeDetector.detect(html, meta.status_code, driver=driver)
+    return html, meta, assessment
+
+
+def settle_page_state(
+    driver: DriverProtocol,
+    target_url: str,
+    collector: XhrCollector,
+) -> tuple[str, MetadataResult, ChallengeAssessment, list[XhrResponse]]:
+    """Collect final page state, attempting one Cloudflare bypass on challenges.
+
+    XHR harvest runs exactly once per attempt, after any bypass, so the
+    consolidated pass captures post-bypass sub-resources.
+    """
+    html, meta, assessment = _page_state(driver, target_url)
+    if assessment.is_clean:
+        return html, meta, assessment, harvest_xhr(collector, driver)
+
+    call_if_available(driver, "bypass_cloudflare")
+    xhr_responses = harvest_xhr(collector, driver)
+    html, meta, assessment = _page_state(driver, target_url)
     return html, meta, assessment, xhr_responses
 
 
@@ -88,7 +84,6 @@ def run_browser_tier(
     try:
         session.prepare_profile_dirs()
     except OSError as exc:
-        render_ms = int((time.monotonic() - started_monotonic) * 1000)
         if exc.errno == errno.ENOSPC:
             detail = "Scrape runtime storage full"
         else:
@@ -98,7 +93,7 @@ def run_browser_tier(
             f"{detail}: {exc}",
             request_id=request_id,
             attempts=0,
-            render_ms=render_ms,
+            render_ms=elapsed_ms(started_monotonic),
             error_category=ErrorCategory.NAVIGATION_ERROR,
             execution_tier=ExecutionTier.BROWSER_DRIVER,
             timeout_phase=TimeoutPhase.BOOT,
@@ -160,25 +155,11 @@ def run_browser_tier(
             if payload.scroll:
                 apply_scrolling(driver)
 
-            html, meta, assessment, xhr_responses = collect_page_state(
-                driver,
-                target_url,
-                collector,
-                include_xhr=False,
+            html, meta, assessment, xhr_responses = settle_page_state(
+                driver, target_url, collector
             )
 
-            if assessment.challenge_detected or assessment.blocked_detected:
-                call_if_available(driver, "bypass_cloudflare")
-                html, meta, assessment, xhr_responses = collect_page_state(
-                    driver,
-                    target_url,
-                    collector,
-                    include_xhr=True,
-                )
-            else:
-                xhr_responses = harvest_xhr(collector, driver)
-
-            if assessment.challenge_detected or assessment.blocked_detected:
+            if not assessment.is_clean:
                 logger.warning(
                     "scrape_challenge_detected request_id=%s host=%s strategy=%s attempt=%d marker=%s",
                     request_id,
@@ -191,7 +172,6 @@ def run_browser_tier(
                     collector.reset()
                     continue
 
-                render_ms = int((time.monotonic() - started_monotonic) * 1000)
                 return build_error(
                     target_url,
                     f"Bot challenge detected ({assessment.detected_marker or 'unknown'})",
@@ -199,12 +179,11 @@ def run_browser_tier(
                     error_category=ErrorCategory.CHALLENGE_BLOCK,
                     attempts=attempts,
                     strategy_used=strategy,
-                    render_ms=render_ms,
+                    render_ms=elapsed_ms(started_monotonic),
                     execution_tier=ExecutionTier.BROWSER_DRIVER,
                     assessment=assessment,
                 )
 
-            render_ms = int((time.monotonic() - started_monotonic) * 1000)
             return build_success(
                 target_url,
                 request_id=request_id,
@@ -215,7 +194,7 @@ def run_browser_tier(
                 metadata_error=meta.metadata_error,
                 attempts=attempts,
                 strategy_used=strategy,
-                render_ms=render_ms,
+                render_ms=elapsed_ms(started_monotonic),
                 execution_tier=ExecutionTier.BROWSER_DRIVER,
                 assessment=assessment,
                 xhr_responses=xhr_responses,
@@ -234,31 +213,30 @@ def run_browser_tier(
                 collector.reset()
                 continue
 
-            render_ms = int((time.monotonic() - started_monotonic) * 1000)
             is_timeout = is_timeout_exception(exc)
-            category = (
-                ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
-            )
             return build_error(
                 target_url,
                 str(exc),
                 request_id=request_id,
                 attempts=attempts,
                 strategy_used=strategy,
-                render_ms=render_ms,
-                error_category=category,
+                render_ms=elapsed_ms(started_monotonic),
+                error_category=(
+                    ErrorCategory.TIMEOUT
+                    if is_timeout
+                    else ErrorCategory.NAVIGATION_ERROR
+                ),
                 execution_tier=ExecutionTier.BROWSER_DRIVER,
                 timeout_phase=TimeoutPhase.WORK if is_timeout else None,
             )
 
-    render_ms = int((time.monotonic() - started_monotonic) * 1000)
     return build_error(
         target_url,
         "Scrape failed after all strategy attempts",
         request_id=request_id,
         attempts=attempts,
         strategy_used=strategies[-1] if strategies else None,
-        render_ms=render_ms,
+        render_ms=elapsed_ms(started_monotonic),
         error_category=ErrorCategory.NAVIGATION_ERROR,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
