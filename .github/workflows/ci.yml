@@ -98,6 +98,9 @@ jobs:
       - name: Execute unit test suite
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
+      - name: Typecheck
+        run: make typecheck
+
       - name: Verify OpenAPI snapshot
         run: make openapi-verify
 

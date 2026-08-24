@@ -10,12 +10,6 @@ from unittest.mock import patch
 
 import app.infra.sentry as sentry_mod
 from app.config import reset_settings_cache
-from app.infra.sentry import (
-    _before_send,
-    flush_sentry,
-    sentry_is_ready,
-    setup_sentry,
-)
 
 
 @contextmanager
@@ -31,22 +25,22 @@ class SentryIntegrationTests(unittest.TestCase):
         reset_settings_cache()
 
     def test_sentry_is_ready_requires_successful_init(self):
-        self.assertFalse(sentry_is_ready())
+        self.assertFalse(sentry_mod.sentry_is_ready())
 
         with (
             env(SENTRY_DSN="https://key@sentry.io/123"),
             patch("sentry_sdk.init"),
         ):
-            self.assertFalse(sentry_is_ready())
-            self.assertTrue(setup_sentry())
-            self.assertTrue(sentry_is_ready())
+            self.assertFalse(sentry_mod.sentry_is_ready())
+            self.assertTrue(sentry_mod.setup_sentry())
+            self.assertTrue(sentry_mod.sentry_is_ready())
 
     def test_setup_sentry_noop_when_dsn_absent(self):
         with (
             env(),
             patch("sentry_sdk.init") as mock_init,
         ):
-            result = setup_sentry()
+            result = sentry_mod.setup_sentry()
             self.assertFalse(result)
             mock_init.assert_not_called()
             self.assertFalse(sentry_mod._initialized)
@@ -58,7 +52,7 @@ class SentryIntegrationTests(unittest.TestCase):
                 env(SENTRY_DSN=val),
                 patch("sentry_sdk.init") as mock_init,
             ):
-                result = setup_sentry()
+                result = sentry_mod.setup_sentry()
                 self.assertFalse(result)
                 mock_init.assert_not_called()
                 self.assertFalse(sentry_mod._initialized)
@@ -70,7 +64,7 @@ class SentryIntegrationTests(unittest.TestCase):
             patch("sentry_sdk.init") as mock_init,
             self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
         ):
-            result = setup_sentry()
+            result = sentry_mod.setup_sentry()
 
             self.assertTrue(result)
             self.assertTrue(sentry_mod._initialized)
@@ -80,7 +74,7 @@ class SentryIntegrationTests(unittest.TestCase):
             self.assertEqual(init_kwargs["environment"], "production")
             self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
             self.assertFalse(init_kwargs["send_default_pii"])
-            self.assertIs(init_kwargs["before_send"], _before_send)
+            self.assertIs(init_kwargs["before_send"], sentry_mod._before_send)
             integration_names = [
                 type(integration).__name__
                 for integration in init_kwargs["integrations"]
@@ -106,7 +100,7 @@ class SentryIntegrationTests(unittest.TestCase):
             ),
             patch("sentry_sdk.init") as mock_init,
         ):
-            result = setup_sentry()
+            result = sentry_mod.setup_sentry()
 
             self.assertTrue(result)
             mock_init.assert_called_once()
@@ -117,18 +111,22 @@ class SentryIntegrationTests(unittest.TestCase):
             self.assertEqual(init_kwargs["traces_sample_rate"], 0.25)
             self.assertEqual(init_kwargs["profiles_sample_rate"], 0.10)
             self.assertTrue(init_kwargs["send_default_pii"])
-            self.assertIs(init_kwargs["before_send"], _before_send)
+            self.assertIs(init_kwargs["before_send"], sentry_mod._before_send)
 
     def test_before_send_drops_challenge_block_issues(self):
-        dropped = _before_send({"tags": {"error_category": "challenge_block"}}, {})
+        dropped = sentry_mod._before_send(
+            {"tags": {"error_category": "challenge_block"}}, {}
+        )
         self.assertIsNone(dropped)
 
-        kept = _before_send({"tags": {"error_category": "navigation_error"}}, {})
+        kept = sentry_mod._before_send(
+            {"tags": {"error_category": "navigation_error"}}, {}
+        )
         assert kept is not None
         self.assertEqual(kept.get("tags", {}).get("error_category"), "navigation_error")
 
     def test_before_send_drops_websocket_teardown(self):
-        dropped = _before_send(
+        dropped = sentry_mod._before_send(
             {
                 "logger": "websocket",
                 "logentry": {"formatted": "Connection to remote host was lost"},
@@ -137,7 +135,7 @@ class SentryIntegrationTests(unittest.TestCase):
         )
         self.assertIsNone(dropped)
 
-        kept = _before_send({"logger": "botasaurus_scrape_api"}, {})
+        kept = sentry_mod._before_send({"logger": "botasaurus_scrape_api"}, {})
         self.assertIsNotNone(kept)
 
     def test_setup_sentry_clamps_sample_rates_and_handles_invalid_floats(self):
@@ -146,7 +144,7 @@ class SentryIntegrationTests(unittest.TestCase):
             env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="invalid_float"),
             patch("sentry_sdk.init") as mock_init,
         ):
-            result = setup_sentry()
+            result = sentry_mod.setup_sentry()
             self.assertTrue(result)
             mock_init.assert_called_once()
             init_kwargs = mock_init.call_args.kwargs
@@ -157,7 +155,7 @@ class SentryIntegrationTests(unittest.TestCase):
             env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="2.5"),
             patch("sentry_sdk.init") as mock_init,
         ):
-            result = setup_sentry()
+            result = sentry_mod.setup_sentry()
             self.assertTrue(result)
             mock_init.assert_called_once()
             init_kwargs = mock_init.call_args.kwargs
@@ -165,19 +163,19 @@ class SentryIntegrationTests(unittest.TestCase):
 
     def test_flush_sentry_noop_when_not_initialized(self):
         with patch("sentry_sdk.flush") as mock_flush:
-            flush_sentry()
+            sentry_mod.flush_sentry()
             mock_flush.assert_not_called()
 
     def test_flush_sentry_invokes_sdk_flush_when_initialized(self):
         sentry_mod._initialized = True
         with patch("sentry_sdk.flush") as mock_flush:
-            flush_sentry(timeout=3.0)
+            sentry_mod.flush_sentry(timeout=3.0)
             mock_flush.assert_called_once_with(timeout=3.0)
 
     def test_flush_sentry_swallows_exceptions_cleanly(self):
         sentry_mod._initialized = True
         with patch("sentry_sdk.flush", side_effect=RuntimeError("flush timeout")):
-            flush_sentry()
+            sentry_mod.flush_sentry()
 
 
 if __name__ == "__main__":

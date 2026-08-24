@@ -50,11 +50,7 @@ class RequestIdContractTests(unittest.TestCase):
         self.assertEqual(response.json()["diagnostics"]["request_id"], self.INBOUND_ID)
 
     def test_honored_request_id_on_400(self):
-        from fastapi.testclient import TestClient
-
-        from app.main import app
-
-        with TestClient(app) as client:
+        with test_client() as client:
             response = client.post(
                 "/scrape",
                 json={"url": "https://this-host-does-not-exist-12345.invalid/"},
@@ -67,11 +63,7 @@ class RequestIdContractTests(unittest.TestCase):
         self.assertEqual(body["error_category"], "validation")
 
     def test_honored_request_id_on_422(self):
-        from fastapi.testclient import TestClient
-
-        from app.main import app
-
-        with TestClient(app) as client:
+        with test_client() as client:
             response = client.post(
                 "/scrape",
                 json={
@@ -148,13 +140,9 @@ class SsrfGuardHttpTests(unittest.TestCase):
 
 class SchemaValidationHttpTests(unittest.TestCase):
     def test_schema_422_returns_scrape_envelope(self):
-        from fastapi.testclient import TestClient
-
-        from app.main import app
-
         with (
             self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
-            TestClient(app) as client,
+            test_client() as client,
         ):
             response = client.post(
                 "/scrape",
