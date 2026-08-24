@@ -9,52 +9,95 @@
 
 ```
 app/
-  main.py              # create_app() factory; module-level `app` for uvicorn
-  config.py            # Settings (pydantic-settings); single env source of truth
-  schemas.py           # wire Pydantic models + OpenAPI examples
-  exceptions.py        # domain exceptions (e.g. RequestIdCollisionError)
+  main.py                    # create_app() factory; module-level `app` for uvicorn
+  constants.py               # SERVICE_NAME and other shared literals
+  config.py                  # Settings + nested SentrySettings; single env source of truth
+  exceptions.py              # domain exceptions (e.g. RequestIdCollisionError)
   api/
-    deps.py            # FastAPI Depends: settings, engine, executor, ScrapeService
-    errors.py          # 422 + 500 handlers → scrape error envelope
-    openapi.py         # route OpenAPI metadata
-    routes/            # thin HTTP handlers (health, scrape)
+    deps.py                  # FastAPI Depends: settings, engine, executor, ScrapeService
+    errors.py                # 422 + 500 handlers → scrape error envelope
+    openapi.py               # route OpenAPI metadata (configure_openapi at app creation)
+    openapi_examples.py      # OpenAPI examples built from Pydantic model instances
+    routes/                  # thin HTTP handlers (health, scrape)
   domain/
-    scrape_service.py  # validation, threadpool orchestration, status mapping
+    scrape_service.py        # validation, threadpool orchestration, status mapping
   engine/
-    orchestrator.py    # ScraperEngine.execute
-    session.py         # ScrapeSession lifecycle
-    request_tier.py    # HTTP/curl_cffi path
-    browser_tier.py    # Chromium path
-    strategies.py      # NavigationMode resolution, driver helpers
-    envelope.py        # success/error builders, UTF-8 HTML normalization
-  infra/               # telemetry, progress, metadata, xhr, runtime cleanup, sentry
-  security/            # UrlGuard SSRF guardrails
+    orchestrator.py          # ScraperEngine.execute
+    session.py               # ScrapeSession lifecycle
+    request_tier.py          # HTTP/curl_cffi path
+    browser_tier.py          # Chromium path
+    strategies.py            # NavigationMode resolution, driver helpers
+    driver_capabilities.py   # DriverProtocol + call_if_available adapter
+    envelope.py              # success/error builders, UTF-8 HTML normalization
+  schemas/
+    enums.py                 # ExecutionMode, NavigationMode, ErrorCategory, ...
+    request.py               # ScrapeRequest and validators
+    response.py              # ScrapeSuccess, ScrapeError, HealthResponse, ...
+  infra/                     # telemetry, progress, metadata, xhr, runtime cleanup, sentry
+  security/                  # UrlGuard SSRF guardrails
+scripts/
+  bench_scrape.py            # TestClient wall-time bench for POST /scrape (request tier)
 tests/
-  support/http.py      # TestClient + dependency_overrides helper
+  api/                       # HTTP contract + request schema tests
+  domain/                    # (reserved)
+  engine/                    # ScraperEngine unit tests
+  infra/                     # challenge, metadata, xhr unit tests
+  security/                  # UrlGuard tests
+  support/
+    http.py                  # TestClient + dependency_overrides helper
+    fakes.py                 # shared FakeDriver, FakeRequest, ...
+  test_bench_regression.py   # lightweight guard that bench script completes
+  test_engine_isolation.py   # singleton + per-request isolation regression tests
 ```
 
 Layer rules:
 
 | Layer | May import | Must not import |
 | --- | --- | --- |
-| `api/routes` | `domain`, `api/deps`, `schemas` | `engine` internals, Botasaurus |
-| `domain` | `engine`, `security`, `schemas`, `infra` | FastAPI, Botasaurus |
-| `engine` | `infra`, `security`, `schemas`, `config` | FastAPI |
-| `infra` | Botasaurus, CDP | FastAPI, routes |
+| `api/routes` | `domain`, `api/deps`, `schemas.*` | `engine` internals, Botasaurus |
+| `domain` | `engine`, `security`, `schemas.*`, `infra` | FastAPI, Botasaurus |
+| `engine` | `infra`, `security`, `schemas.*`, `config` | FastAPI |
+| `infra` | Botasaurus, CDP (lazy at use sites) | FastAPI, routes |
 
 Conventions:
 
 - Use `create_app()` in tests; override deps via `app.dependency_overrides`, not module globals.
+- Use `TestClient(app)` as a context manager so lifespan runs (singleton engine/executor).
 - Config: add env vars to `Settings` in `config.py`; call `reset_settings_cache()` in tests that patch env.
-- Wire types stay in `schemas.py`; domain logic stays out of route handlers and Pydantic shells.
+- Wire types live in `app/schemas/` submodules; import directly (`from app.schemas.request import ScrapeRequest`). No long-lived re-export shim.
+- Domain logic stays out of route handlers and Pydantic shells.
 - Typed exceptions over string-matching (`RequestIdCollisionError`, not `RuntimeError` message checks).
 - `NavigationMode` end-to-end in engine code; no raw strategy strings outside enum conversion boundaries.
+- Optional Botasaurus driver methods go through `driver_capabilities.call_if_available` only; do not ad-hoc `getattr(driver, ...)`.
+- OpenAPI route examples come from `openapi_examples.py` model instances, not hand-typed dicts.
+- Botasaurus/CDP imports are lazy inside tier entrypoints (`run_request_tier`, `run_browser_tier`, XhrCollector methods), not at app import time.
+
+## Singleton + Settings Threading
+
+- **One** `ScraperEngine` and **one** `ThreadPoolExecutor` are created in `create_app()` lifespan and stored on `app.state`.
+- `get_engine` / `get_executor` / `SettingsDep` read from `request.app.state` (not per-request construction).
+- Lifespan shutdown calls `executor.shutdown(wait=False, cancel_futures=True)` on the real pool instance.
+- Do **not** freeze settings at import time in schemas or OpenAPI modules. `configure_openapi(settings)` runs during `create_app()`; `clamp_wait_timeout_seconds` reads live `get_settings()`.
+- `ScraperEngine` and tier functions require an injected `Settings` parameter; no `get_settings()` fallback in the hot path.
+
+## Isolation Invariants
+
+| Resource | Lifetime | Rule |
+| --- | --- | --- |
+| `ScraperEngine` | process (app.state) | shared |
+| `ThreadPoolExecutor` | process (app.state) | shared, sized by `SCRAPE_MAX_WORKERS` |
+| `_active_request_ids` | in-process memory | shared; collision guard |
+| runtime dir `/tmp/scrape/<request_id>` | per request | isolated; deleted in `finally` |
+| browser profile | per request | isolated; no reuse |
+| Botasaurus Driver | per request | isolated; closed in `finally` |
+
+Multi-worker uvicorn breaks in-process collision detection unless request ids are sticky to a worker. Default to single-worker for isolation semantics.
 
 ## Contract (Do Not Break)
 
 - Endpoints: `GET /health`, `POST /scrape`.
 - `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`. Spectral (`make spectral`) lints the snapshot; do not add a post-processor that mutates the dump.
-- Wire types live in `app/schemas.py`. Engine imports them. Routes serialize via `ScrapeService.serialize()` / `json_response()`.
+- Wire types live in `app/schemas/`. Engine imports them. Routes serialize via `ScrapeService.serialize()` / `json_response()`.
 - OpenAPI `info.version` is `2.0.0`. Schema names: `ScrapeSuccess` (200) and `ScrapeError` (400/403/422/502/504). No `ScrapeResponse` alias.
 - Success `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `metadata_error`, `xhr_responses`, `diagnostics`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
@@ -92,6 +135,19 @@ Conventions:
   - keep `/usr/bin/google-chrome` symlink to Chromium for compatibility
 - If browser install logic changes, re-verify binary path and Botasaurus startup.
 
+## Performance
+
+- Baseline bench: `PYTHONPATH=. .venv/bin/python3 scripts/bench_scrape.py --runs 10` (TestClient, `execution_mode=request`).
+- Record p50 wall time when changing hot paths; avoid regressions vs prior baseline.
+- On low-RAM hosts (Docker `--memory=768m`, 1–2 vCPU), tune `SCRAPE_MAX_WORKERS` to `1` or `2`; higher values increase queue wait and swap without improving wall time.
+- Browser tier skips XHR harvest before Cloudflare bypass; one consolidated `collect_page_state` pass runs after bypass.
+
+## Types
+
+- `make typecheck` runs `pyright app tests` and is part of `make check`.
+- Engine driver seams use `DriverProtocol` in `driver_capabilities.py`; cast vendor `Driver` at construction when needed.
+- Test-only pyright relaxations live in `pyproject.toml` `[[tool.pyright.executionEnvironments]]` for `tests/`.
+
 ## Safety
 
 - Keep SSRF guardrails: localhost/domain checks and blocked IP classes (loopback/private/link-local/multicast/reserved/unspecified).
@@ -99,7 +155,7 @@ Conventions:
 
 ## Done Criteria
 
-- Run `make check` before finish.
+- Run `make check` before finish (lint, test, typecheck, openapi-verify).
 - When Pydantic models or route response metadata change, run `make openapi` and commit the snapshot with the code change.
 - When API contract, Docker behavior, or error semantics change, also run `make smoke`.
 - `make smoke` must cover build, boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation check, localhost guardrail.
