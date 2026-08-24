@@ -5,15 +5,12 @@ from __future__ import annotations
 from typing import Any
 
 from app.infra.detector import ChallengeAssessment
-from app.schemas import (
+from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
+from app.schemas.response import (
     ChallengeSignal,
-    ErrorCategory,
-    ExecutionTier,
-    NavigationMode,
     ScrapeDiagnostics,
     ScrapeError,
     ScrapeSuccess,
-    TimeoutPhase,
     XhrResponse,
 )
 

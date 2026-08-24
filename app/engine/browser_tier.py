@@ -26,14 +26,9 @@ from app.infra.detector import ChallengeDetector
 from app.infra.metadata import MetadataExtractor
 from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
-from app.schemas import (
-    ErrorCategory,
-    ExecutionTier,
-    ScrapeError,
-    ScrapeRequest,
-    ScrapeSuccess,
-    TimeoutPhase,
-)
+from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
+from app.schemas.request import ScrapeRequest
+from app.schemas.response import ScrapeError, ScrapeSuccess
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

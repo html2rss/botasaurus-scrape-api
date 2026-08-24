@@ -20,16 +20,15 @@ from app.infra.runtime_cleanup import (
     runtime_root_low_on_space,
 )
 from app.infra.scrape_progress import ScrapeProgress
-from app.schemas import (
+from app.schemas.enums import (
     ErrorCategory,
     ExecutionMode,
     ExecutionTier,
     NavigationMode,
-    ScrapeError,
-    ScrapeRequest,
-    ScrapeSuccess,
     TimeoutPhase,
 )
+from app.schemas.request import ScrapeRequest
+from app.schemas.response import ScrapeError, ScrapeSuccess
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

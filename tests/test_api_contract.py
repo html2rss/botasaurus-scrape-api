@@ -21,17 +21,14 @@ from app.engine.strategies import (
 from app.exceptions import RequestIdCollisionError
 from app.infra.detector import ChallengeDetector
 from app.infra.metadata import MetadataExtractor
-from app.schemas import (
+from app.schemas.enums import (
     ErrorCategory,
     ExecutionMode,
     ExecutionTier,
     NavigationMode,
-    ScrapeDiagnostics,
-    ScrapeError,
-    ScrapeRequest,
-    ScrapeSuccess,
-    WindowSize,
 )
+from app.schemas.request import ScrapeRequest, WindowSize
+from app.schemas.response import ScrapeDiagnostics, ScrapeError, ScrapeSuccess
 from app.security import UrlGuard
 
 

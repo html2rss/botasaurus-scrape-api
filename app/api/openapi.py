@@ -10,7 +10,7 @@ from app.api.openapi_examples import (
     SCRAPE_SUCCESS_EXAMPLE,
 )
 from app.config import Settings
-from app.schemas import ScrapeError
+from app.schemas.response import ScrapeError
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,14 +9,8 @@ from app.infra.ops_telemetry import (
     record_challenge_block,
     report_terminal_outcome,
 )
-from app.schemas import (
-    ErrorCategory,
-    ExecutionTier,
-    NavigationMode,
-    ScrapeDiagnostics,
-    ScrapeError,
-    TimeoutPhase,
-)
+from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
+from app.schemas.response import ScrapeDiagnostics, ScrapeError
 
 
 def _scrape_error(

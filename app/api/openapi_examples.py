@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from app.constants import SERVICE_NAME
-from app.schemas import (
+from app.schemas.enums import ErrorCategory, ExecutionTier
+from app.schemas.response import (
     ChallengeSignal,
-    ErrorCategory,
-    ExecutionTier,
     HealthResponse,
     ScrapeDiagnostics,
     ScrapeError,

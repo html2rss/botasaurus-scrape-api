@@ -10,7 +10,8 @@ from fastapi.responses import JSONResponse
 from app.api.deps import ScrapeServiceDep, resolve_scrape_request_id
 from app.api.errors import json_response
 from app.api.openapi import SCRAPE_ERROR_RESPONSES, SCRAPE_SUCCESS_RESPONSE
-from app.schemas import ScrapeRequest, ScrapeSuccess
+from app.schemas.request import ScrapeRequest
+from app.schemas.response import ScrapeSuccess
 
 router = APIRouter(tags=["scrape"])
 

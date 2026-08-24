@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.infra.request_id import resolve_request_id
-from app.schemas import ScrapeError, ScrapeSuccess, validation_error
+from app.schemas.response import ScrapeError, ScrapeSuccess, validation_error
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

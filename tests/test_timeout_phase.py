@@ -13,13 +13,8 @@ from app.config import get_settings
 from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
 from app.infra.scrape_progress import ScrapeProgress
-from app.schemas import (
-    ExecutionMode,
-    ExecutionTier,
-    NavigationMode,
-    ScrapeRequest,
-    TimeoutPhase,
-)
+from app.schemas.enums import ExecutionMode, ExecutionTier, NavigationMode, TimeoutPhase
+from app.schemas.request import ScrapeRequest
 
 _URL = "https://example.com"
 _HTML = "<html><body><h1>Example Domain</h1></body></html>"

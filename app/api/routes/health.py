@@ -8,7 +8,7 @@ from fastapi import APIRouter
 
 from app.api.openapi import HEALTH_RESPONSES
 from app.constants import SERVICE_NAME
-from app.schemas import HealthResponse
+from app.schemas.response import HealthResponse
 
 router = APIRouter(tags=["health"])
 

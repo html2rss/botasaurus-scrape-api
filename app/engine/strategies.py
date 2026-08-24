@@ -11,7 +11,8 @@ from app.engine.driver_capabilities import (
     call_quietly,
 )
 from app.infra.xhr_collector import XhrCollector
-from app.schemas import NavigationMode, ScrapeRequest
+from app.schemas.enums import NavigationMode
+from app.schemas.request import ScrapeRequest
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

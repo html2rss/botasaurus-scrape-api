@@ -4,7 +4,8 @@ import logging
 from urllib.parse import urlparse
 
 from app.constants import SERVICE_NAME
-from app.schemas import ErrorCategory, ScrapeError
+from app.schemas.enums import ErrorCategory
+from app.schemas.response import ScrapeError
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

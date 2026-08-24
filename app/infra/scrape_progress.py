@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass, replace
 
-from app.schemas import ExecutionTier, NavigationMode, TimeoutPhase
+from app.schemas.enums import ExecutionTier, NavigationMode, TimeoutPhase
 
 
 @dataclass(frozen=True, slots=True)

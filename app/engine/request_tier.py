@@ -12,15 +12,9 @@ from app.config import Settings
 from app.engine.envelope import build_error, build_success
 from app.infra.detector import ChallengeDetector
 from app.infra.scrape_progress import ScrapeProgress
-from app.schemas import (
-    ErrorCategory,
-    ExecutionMode,
-    ExecutionTier,
-    ScrapeError,
-    ScrapeRequest,
-    ScrapeSuccess,
-    TimeoutPhase,
-)
+from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
+from app.schemas.request import ScrapeRequest
+from app.schemas.response import ScrapeError, ScrapeSuccess
 
 logger = logging.getLogger("botasaurus_scrape_api")
 

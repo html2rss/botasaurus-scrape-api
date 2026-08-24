@@ -16,13 +16,12 @@ from app.engine import ScraperEngine
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.scrape_progress import ScrapeProgress
-from app.schemas import (
-    ErrorCategory,
+from app.schemas.enums import ErrorCategory, TimeoutPhase
+from app.schemas.request import ScrapeRequest
+from app.schemas.response import (
     ScrapeDiagnostics,
     ScrapeError,
-    ScrapeRequest,
     ScrapeSuccess,
-    TimeoutPhase,
     validation_error,
 )
 from app.security import UrlGuard, ValidationResult
