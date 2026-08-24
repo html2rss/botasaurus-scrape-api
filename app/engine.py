@@ -204,31 +204,8 @@ def _error(
     )
 
 
-def _terminal_error(
-    url: str,
-    message: str,
-    *,
-    request_id: str,
-    error_category: ErrorCategory,
-    attempts: int = 0,
-    strategy_used: NavigationMode | None = None,
-    render_ms: int = 0,
-    execution_tier: ExecutionTier | None = None,
-    assessment: ChallengeAssessment | None = None,
-    timeout_phase: TimeoutPhase | None = None,
-) -> ScrapeError:
-    return _error(
-        url,
-        message,
-        request_id=request_id,
-        error_category=error_category,
-        attempts=attempts,
-        strategy_used=strategy_used,
-        render_ms=render_ms,
-        execution_tier=execution_tier,
-        assessment=assessment,
-        timeout_phase=timeout_phase,
-    )
+# Semantic alias: terminal outcomes use the same envelope builder.
+_terminal_error = _error
 
 
 class ScrapeSession:
@@ -433,16 +410,15 @@ class ScraperEngine:
         payload: ScrapeRequest,
         request_id: str,
         started_monotonic: float,
-        progress: ScrapeProgress | None = None,
+        progress: ScrapeProgress,
     ) -> ScrapeSuccess | ScrapeError | None:
         target_url = str(payload.url)
         remaining_budget = _remaining_total_seconds(started_monotonic)
-        if progress is not None:
-            progress.mark(
-                TimeoutPhase.WORK,
-                attempts=1,
-                execution_tier=ExecutionTier.HTTP_REQUEST,
-            )
+        progress.mark(
+            TimeoutPhase.WORK,
+            attempts=1,
+            execution_tier=ExecutionTier.HTTP_REQUEST,
+        )
 
         req_headers = dict(payload.headers) if payload.headers else {}
         proxies = (
@@ -529,15 +505,14 @@ class ScraperEngine:
         payload: ScrapeRequest,
         session: ScrapeSession,
         started_monotonic: float,
-        progress: ScrapeProgress | None = None,
+        progress: ScrapeProgress,
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         request_id = session.request_id
-        if progress is not None:
-            progress.mark(
-                TimeoutPhase.BOOT,
-                execution_tier=ExecutionTier.BROWSER_DRIVER,
-            )
+        progress.mark(
+            TimeoutPhase.BOOT,
+            execution_tier=ExecutionTier.BROWSER_DRIVER,
+        )
         session.prepare_profile_dirs()
 
         strategies = self.resolve_strategies(
@@ -567,21 +542,19 @@ class ScraperEngine:
         )
         self._configure_driver(session.driver, payload, target_url, collector=collector)
         browser_ready_monotonic = time.monotonic()
-        if progress is not None:
-            progress.mark(
-                TimeoutPhase.WORK,
-                execution_tier=ExecutionTier.BROWSER_DRIVER,
-            )
+        progress.mark(
+            TimeoutPhase.WORK,
+            execution_tier=ExecutionTier.BROWSER_DRIVER,
+        )
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
-            if progress is not None:
-                progress.mark(
-                    TimeoutPhase.WORK,
-                    attempts=attempts,
-                    strategy_used=NavigationMode(strategy),
-                    execution_tier=ExecutionTier.BROWSER_DRIVER,
-                )
+            progress.mark(
+                TimeoutPhase.WORK,
+                attempts=attempts,
+                strategy_used=NavigationMode(strategy),
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            )
             try:
                 step_budget = _browser_step_budget_seconds(
                     started_monotonic, browser_ready_monotonic
@@ -720,10 +693,10 @@ class ScraperEngine:
         target_url = str(payload.url)
         resolved_request_id = request_id or str(uuid.uuid4())
         started_monotonic = time.monotonic()
+        progress = progress or ScrapeProgress()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
-            if progress is not None:
-                progress.mark(TimeoutPhase.QUEUE)
+            progress.mark(TimeoutPhase.QUEUE)
             return _terminal_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",

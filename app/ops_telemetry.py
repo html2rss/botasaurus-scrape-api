@@ -39,10 +39,9 @@ def _apply_scrape_tags(scope: object, result: ScrapeError, *, http_status: int) 
         "request_id": diagnostics.request_id,
         "attempts": diagnostics.attempts,
     }
-    if diagnostics.timeout_phase is not None:
-        phase = diagnostics.timeout_phase.value
-        scope.set_tag("timeout_phase", phase)  # type: ignore[attr-defined]
-        scrape_context["timeout_phase"] = phase
+    if phase := diagnostics.timeout_phase:
+        scope.set_tag("timeout_phase", phase.value)  # type: ignore[attr-defined]
+        scrape_context["timeout_phase"] = phase.value
     scope.set_context("scrape", scrape_context)  # type: ignore[attr-defined]
     if diagnostics.strategy_used is not None:
         scope.set_tag("strategy_used", diagnostics.strategy_used.value)  # type: ignore[attr-defined]
@@ -62,7 +61,7 @@ def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
     host = _hostname(result.url)
     category = result.error_category.value
     phase = result.diagnostics.timeout_phase
-    category_label = f"{category}/{phase.value}" if phase is not None else category
+    category_label = f"{category}/{phase.value}" if phase else category
 
     with sentry_sdk.new_scope() as scope:
         scope.fingerprint = _issue_fingerprint(category, host)
