@@ -9,6 +9,55 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+class SentrySettings(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    dsn: str = Field(default="", validation_alias="SENTRY_DSN")
+    environment: str = Field(default="", validation_alias="SENTRY_ENVIRONMENT")
+    release: str = Field(default="", validation_alias="SENTRY_RELEASE")
+    traces_sample_rate: float = Field(
+        default=0.0, validation_alias="SENTRY_TRACES_SAMPLE_RATE"
+    )
+    profiles_sample_rate: float = Field(
+        default=0.0, validation_alias="SENTRY_PROFILES_SAMPLE_RATE"
+    )
+    send_default_pii: bool = Field(
+        default=False, validation_alias="SENTRY_SEND_DEFAULT_PII"
+    )
+
+    @field_validator(
+        "traces_sample_rate",
+        "profiles_sample_rate",
+        mode="before",
+    )
+    @classmethod
+    def parse_sample_rate(cls, value: object) -> float:
+        if value is None:
+            return 0.0
+        try:
+            parsed = float(str(value).strip())
+            return max(0.0, min(1.0, parsed))
+        except (ValueError, AttributeError):  # fmt: skip
+            return 0.0
+
+    @field_validator("send_default_pii", mode="before")
+    @classmethod
+    def parse_bool(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+        normalized = str(value).strip().lower()
+        if normalized in ("true", "1", "yes", "on"):
+            return True
+        if normalized in ("false", "0", "no", "off"):
+            return False
+        return False
+
+    def effective_environment(self, deployment_environment: str) -> str:
+        return (self.environment or deployment_environment or "production").strip()
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -24,52 +73,12 @@ class Settings(BaseSettings):
         validation_alias="SCRAPE_RUNTIME_MIN_FREE_BYTES",
     )
     runtime_root: Path = Field(default=Path("/tmp/scrape"))
-
-    sentry_dsn: str = Field(default="", validation_alias="SENTRY_DSN")
-    sentry_environment: str = Field(default="", validation_alias="SENTRY_ENVIRONMENT")
-    sentry_release: str = Field(default="", validation_alias="SENTRY_RELEASE")
-    sentry_traces_sample_rate: float = Field(
-        default=0.0, validation_alias="SENTRY_TRACES_SAMPLE_RATE"
-    )
-    sentry_profiles_sample_rate: float = Field(
-        default=0.0, validation_alias="SENTRY_PROFILES_SAMPLE_RATE"
-    )
-    sentry_send_default_pii: bool = Field(
-        default=False, validation_alias="SENTRY_SEND_DEFAULT_PII"
-    )
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
-
-    @field_validator(
-        "sentry_traces_sample_rate",
-        "sentry_profiles_sample_rate",
-        mode="before",
-    )
-    @classmethod
-    def parse_sample_rate(cls, value: object) -> float:
-        if value is None:
-            return 0.0
-        try:
-            parsed = float(str(value).strip())
-            return max(0.0, min(1.0, parsed))
-        except (ValueError, AttributeError):  # fmt: skip
-            return 0.0
-
-    @field_validator("sentry_send_default_pii", mode="before")
-    @classmethod
-    def parse_bool(cls, value: object) -> bool:
-        if isinstance(value, bool):
-            return value
-        if value is None:
-            return False
-        normalized = str(value).strip().lower()
-        if normalized in ("true", "1", "yes", "on"):
-            return True
-        if normalized in ("false", "0", "no", "off"):
-            return False
-        return False
+    sentry: SentrySettings | None = None
 
     @model_validator(mode="after")
     def validate_timeout_relationship(self) -> Settings:
+        object.__setattr__(self, "sentry", SentrySettings())
         if self.scrape_work_timeout_seconds > self.scrape_timeout_seconds:
             raise ValueError(
                 "SCRAPE_WORK_TIMEOUT_SECONDS cannot exceed SCRAPE_TIMEOUT_SECONDS: "
@@ -81,10 +90,6 @@ class Settings(BaseSettings):
     @property
     def default_wait_timeout_seconds(self) -> int:
         return min(15, self.scrape_work_timeout_seconds)
-
-    @property
-    def effective_sentry_environment(self) -> str:
-        return (self.sentry_environment or self.environment or "production").strip()
 
 
 @lru_cache

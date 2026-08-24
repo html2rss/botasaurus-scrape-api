@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from app.config import Settings
+from app.config import SentrySettings, Settings
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -14,7 +14,7 @@ def is_sentry_enabled(settings: Settings | None = None) -> bool:
     from app.config import get_settings
 
     resolved = settings or get_settings()
-    return bool(resolved.sentry_dsn.strip())
+    return bool(resolved.sentry.dsn.strip())
 
 
 def sentry_is_ready() -> bool:
@@ -47,7 +47,13 @@ def setup_sentry(settings: Settings | None = None) -> bool:
     from app.config import get_settings
 
     resolved = settings or get_settings()
-    dsn = resolved.sentry_dsn.strip()
+    return _setup_sentry(resolved.sentry, deployment_environment=resolved.environment)
+
+
+def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> bool:
+    global _INITIALIZED
+
+    dsn = sentry.dsn.strip()
     if not dsn:
         return False
 
@@ -61,14 +67,14 @@ def setup_sentry(settings: Settings | None = None) -> bool:
         )
         return False
 
-    traces_sample_rate = max(0.0, min(1.0, resolved.sentry_traces_sample_rate))
-    profiles_sample_rate = max(0.0, min(1.0, resolved.sentry_profiles_sample_rate))
+    traces_sample_rate = max(0.0, min(1.0, sentry.traces_sample_rate))
+    profiles_sample_rate = max(0.0, min(1.0, sentry.profiles_sample_rate))
 
     init_kwargs: dict[str, Any] = {
         "dsn": dsn,
-        "environment": resolved.effective_sentry_environment,
+        "environment": sentry.effective_environment(deployment_environment),
         "traces_sample_rate": traces_sample_rate,
-        "send_default_pii": resolved.sentry_send_default_pii,
+        "send_default_pii": sentry.send_default_pii,
         "integrations": [
             FastApiIntegration(),
             StarletteIntegration(),
@@ -76,8 +82,8 @@ def setup_sentry(settings: Settings | None = None) -> bool:
         "before_send": _before_send,
     }
 
-    if resolved.sentry_release.strip():
-        init_kwargs["release"] = resolved.sentry_release.strip()
+    if sentry.release.strip():
+        init_kwargs["release"] = sentry.release.strip()
     if profiles_sample_rate > 0.0:
         init_kwargs["profiles_sample_rate"] = profiles_sample_rate
 
@@ -86,8 +92,8 @@ def setup_sentry(settings: Settings | None = None) -> bool:
 
     logger.info(
         "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
-        resolved.effective_sentry_environment,
-        resolved.sentry_release or None,
+        sentry.effective_environment(deployment_environment),
+        sentry.release or None,
         traces_sample_rate,
     )
     return True

@@ -322,12 +322,12 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `SENTRY_DSN` | _(unset)_ | Project DSN. |
-| `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`ENVIRONMENT` fallback). |
-| `SENTRY_RELEASE` | _(unset)_ | Release tag on events. |
-| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (off by default; enable later if needed). |
-| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate. |
-| `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true`. |
+| `SENTRY_DSN` | _(unset)_ | Project DSN (`Settings.sentry.dsn`). |
+| `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`Settings.sentry.environment`; `ENVIRONMENT` fallback). |
+| `SENTRY_RELEASE` | _(unset)_ | Release tag on events (`Settings.sentry.release`). |
+| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (`Settings.sentry.traces_sample_rate`; off by default). |
+| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate (`Settings.sentry.profiles_sample_rate`). |
+| `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true` (`Settings.sentry.send_default_pii`). |
 
 **Signal routing:** `navigation_error` and `timeout` → grouped Sentry Issues. `challenge_block` → `scrape.challenge_block` metric only; engine stdout keeps the detailed log line. Traces stay off unless you raise `SENTRY_TRACES_SAMPLE_RATE`.
 
