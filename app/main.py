@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,6 +18,7 @@ from app.api.openapi import (
 )
 from app.api.routes import health, scrape
 from app.config import Settings, get_settings
+from app.engine import ScraperEngine
 from app.infra.sentry import flush_sentry, setup_sentry
 from app.logging_config import setup_logging
 
@@ -28,10 +30,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
+        app.state.settings = resolved_settings
+        app.state.engine = ScraperEngine(settings=resolved_settings)
+        app.state.executor = ThreadPoolExecutor(
+            max_workers=max(1, resolved_settings.scrape_max_workers)
+        )
         yield
-        executor = getattr(app.state, "executor", None)
-        if executor is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
+        app.state.executor.shutdown(wait=False, cancel_futures=True)
         flush_sentry()
 
     app = FastAPI(
@@ -44,7 +49,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_tags=OPENAPI_TAGS,
         lifespan=lifespan,
     )
-    app.state.settings = resolved_settings
 
     register_exception_handlers(app)
     app.include_router(health.router)

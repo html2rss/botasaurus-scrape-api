@@ -5,7 +5,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 
 from app.config import Settings, get_settings
 from app.domain.scrape_service import ScrapeService
@@ -15,15 +15,15 @@ from app.infra.request_id import resolve_request_id
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
-def get_executor(settings: SettingsDep) -> ThreadPoolExecutor:
-    return ThreadPoolExecutor(max_workers=max(1, settings.scrape_max_workers))
+def get_executor(request: Request) -> ThreadPoolExecutor:
+    return request.app.state.executor
 
 
 ExecutorDep = Annotated[ThreadPoolExecutor, Depends(get_executor)]
 
 
-def get_engine(settings: SettingsDep) -> ScraperEngine:
-    return ScraperEngine(settings=settings)
+def get_engine(request: Request) -> ScraperEngine:
+    return request.app.state.engine
 
 
 EngineDep = Annotated[ScraperEngine, Depends(get_engine)]

@@ -962,12 +962,12 @@ class RequestIdContractTests(unittest.TestCase):
 
         from app.main import app
 
-        client = TestClient(app)
-        response = client.post(
-            "/scrape",
-            json={"url": "https://this-host-does-not-exist-12345.invalid/"},
-            headers={"X-Request-Id": self.INBOUND_ID},
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/scrape",
+                json={"url": "https://this-host-does-not-exist-12345.invalid/"},
+                headers={"X-Request-Id": self.INBOUND_ID},
+            )
 
         self.assertEqual(response.status_code, 400)
         body = response.json()
@@ -979,15 +979,15 @@ class RequestIdContractTests(unittest.TestCase):
 
         from app.main import app
 
-        client = TestClient(app)
-        response = client.post(
-            "/scrape",
-            json={
-                "url": "https://example.com",
-                "window_size": [1920],
-            },
-            headers={"X-Request-Id": self.INBOUND_ID},
-        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "window_size": [1920],
+                },
+                headers={"X-Request-Id": self.INBOUND_ID},
+            )
 
         self.assertEqual(response.status_code, 422)
         body = response.json()
@@ -1021,8 +1021,10 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         from app.main import app
 
-        with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
-            client = TestClient(app)
+        with (
+            self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
+            TestClient(app) as client,
+        ):
             response = client.post(
                 "/scrape",
                 json={
