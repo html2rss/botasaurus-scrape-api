@@ -1,7 +1,8 @@
-# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
+# pyright: reportPrivateUsage=false
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from app.config import get_settings
@@ -34,7 +35,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         captured: dict[str, int | None] = {"navigate_timeout": None}
 
         class _NavigateCaptureDriver(FakeDriver):
-            def get(self, *_args, **kwargs):
+            def get(self, *_args: object, **kwargs: Any) -> None:
                 captured["navigate_timeout"] = kwargs.get("timeout")
                 return None
 

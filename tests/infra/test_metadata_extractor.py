@@ -1,4 +1,3 @@
-# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import unittest
 from typing import cast
 
@@ -9,7 +8,7 @@ from app.infra.metadata import MetadataExtractor
 class MetadataExtractorUnitTests(unittest.TestCase):
     def test_extract_passive_metadata_from_requests_list(self):
         class _Req:
-            def __init__(self, status, headers, url):
+            def __init__(self, status: int, headers: dict[str, str], url: str) -> None:
                 self.response = type(
                     "Resp", (), {"status_code": status, "headers": headers}
                 )()
@@ -55,17 +54,13 @@ class MetadataExtractorUnitTests(unittest.TestCase):
                 )
             }
         ]
-        driver = type(
-            "D",
-            (),
-            {
-                "get_log": lambda self, log_type: (
-                    perf_log if log_type == "performance" else []
-                )
-            },
-        )()
+
+        class _LogDriver:
+            def get_log(self, log_type: str) -> list[dict[str, str]]:
+                return perf_log if log_type == "performance" else []
+
         status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(
-            cast(DriverProtocol, driver)
+            cast(DriverProtocol, _LogDriver())
         )
         self.assertEqual(status, 200)
         self.assertEqual(headers, {"content-type": "text/html"})

@@ -11,16 +11,13 @@ from unittest.mock import patch
 from app.config import get_settings
 from app.engine import ScraperEngine
 from app.engine.session import ScrapeSession
+from tests.support.fakes import fake_request_cls
+from tests.support.http import test_client
 
 
 class EngineSingletonTests(unittest.TestCase):
     def test_app_state_shares_one_engine_and_executor(self):
-        from fastapi.testclient import TestClient
-
-        from app.main import create_app
-
-        app = create_app()
-        with TestClient(app) as client:
+        with test_client() as client:
             engine_a = client.app.state.engine
             engine_b = client.app.state.engine
             executor_a = client.app.state.executor
@@ -36,8 +33,6 @@ class IsolationRegressionTests(unittest.TestCase):
     COLLISION_ID = "550e8400-e29b-41d4-a716-446655440000"
 
     def test_concurrent_scrapes_use_distinct_runtime_dirs(self):
-        from tests.support.http import test_client
-
         runtime_dirs: list[Path] = []
         gate = threading.Event()
         release = threading.Event()
@@ -53,6 +48,7 @@ class IsolationRegressionTests(unittest.TestCase):
 
         with (
             patch.object(ScrapeSession, "__enter__", tracking_enter),
+            patch("botasaurus.request.Request", fake_request_cls()),
             test_client() as client,
         ):
             first = threading.Thread(
@@ -69,31 +65,17 @@ class IsolationRegressionTests(unittest.TestCase):
                     headers={"X-Request-Id": self.INBOUND_ID_B},
                 )
             )
-            with patch("botasaurus.request.Request") as mock_request:
-                mock_request.return_value.get.return_value = type(
-                    "Resp",
-                    (),
-                    {
-                        "text": "<html>ok</html>",
-                        "status_code": 200,
-                        "headers": {},
-                        "url": "https://example.com/",
-                    },
-                )()
-                mock_request.return_value.close.return_value = None
-                first.start()
-                self.assertTrue(gate.wait(timeout=5))
-                second.start()
-                release.set()
-                first.join(timeout=10)
-                second.join(timeout=10)
+            first.start()
+            self.assertTrue(gate.wait(timeout=5))
+            second.start()
+            release.set()
+            first.join(timeout=10)
+            second.join(timeout=10)
 
         self.assertEqual(len(runtime_dirs), 2)
         self.assertNotEqual(runtime_dirs[0], runtime_dirs[1])
 
     def test_duplicate_request_id_while_active_returns_502(self):
-        from tests.support.http import test_client
-
         active = threading.Event()
         release = threading.Event()
         original_enter = ScrapeSession.__enter__
@@ -108,27 +90,13 @@ class IsolationRegressionTests(unittest.TestCase):
 
         with (
             patch.object(ScrapeSession, "__enter__", slow_enter),
+            patch("botasaurus.request.Request", fake_request_cls()),
             test_client() as client,
-            patch("botasaurus.request.Request") as mock_request,
         ):
-            mock_request.return_value.get.return_value = type(
-                "Resp",
-                (),
-                {
-                    "text": "<html>ok</html>",
-                    "status_code": 200,
-                    "headers": {},
-                    "url": "https://example.com/",
-                },
-            )()
-            mock_request.return_value.close.return_value = None
             first = threading.Thread(
                 target=lambda: client.post(
                     "/scrape",
-                    json={
-                        "url": "https://example.com",
-                        "execution_mode": "request",
-                    },
+                    json={"url": "https://example.com", "execution_mode": "request"},
                     headers={"X-Request-Id": self.COLLISION_ID},
                 )
             )
@@ -149,32 +117,24 @@ class IsolationRegressionTests(unittest.TestCase):
         self.assertEqual(body["error_category"], "navigation_error")
 
     def test_runtime_dir_removed_after_scrape_completes(self):
-        from tests.support.http import test_client
-
         captured_dir: Path | None = None
         original_exit = ScrapeSession.__exit__
 
-        def capture_exit(self, exc_type, exc_val, exc_tb):
+        def capture_exit(
+            self: ScrapeSession,
+            exc_type: object,
+            exc_val: object,
+            exc_tb: object,
+        ) -> bool | None:
             nonlocal captured_dir
             captured_dir = self.runtime_dir
-            return original_exit(self, exc_type, exc_val, exc_tb)
+            return original_exit(self, exc_type, exc_val, exc_tb)  # type: ignore[arg-type]
 
         with (
             patch.object(ScrapeSession, "__exit__", capture_exit),
+            patch("botasaurus.request.Request", fake_request_cls()),
             test_client() as client,
-            patch("botasaurus.request.Request") as mock_request,
         ):
-            mock_request.return_value.get.return_value = type(
-                "Resp",
-                (),
-                {
-                    "text": "<html>ok</html>",
-                    "status_code": 200,
-                    "headers": {},
-                    "url": "https://example.com/",
-                },
-            )()
-            mock_request.return_value.close.return_value = None
             response = client.post(
                 "/scrape",
                 json={"url": "https://example.com", "execution_mode": "request"},
@@ -192,10 +152,11 @@ class IsolationRegressionTests(unittest.TestCase):
             request_id = "req-active-track"
             engine.register_request_id(request_id)
             try:
-                self.assertIn(request_id, engine._active_request_ids)
+                self.assertIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
             finally:
                 engine.unregister_request_id(request_id)
-            self.assertNotIn(request_id, engine._active_request_ids)
+            self.assertNotIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
 
 
-# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
+if __name__ == "__main__":
+    unittest.main()

@@ -1,5 +1,6 @@
-# tests/test_sentry.py
-# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
+# pyright: reportPrivateUsage=false
+"""Sentry setup, readiness, and event filtering tests (exercise module privates)."""
+
 from __future__ import annotations
 
 import os
@@ -123,6 +124,7 @@ class SentryIntegrationTests(unittest.TestCase):
         self.assertIsNone(dropped)
 
         kept = _before_send({"tags": {"error_category": "navigation_error"}}, {})
+        assert kept is not None
         self.assertEqual(kept.get("tags", {}).get("error_category"), "navigation_error")
 
     def test_before_send_drops_websocket_teardown(self):

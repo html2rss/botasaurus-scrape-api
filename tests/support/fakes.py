@@ -119,6 +119,23 @@ class FakeRequest:
         return None
 
 
+def fake_request_cls(
+    *,
+    html: str = "<html>ok</html>",
+    url: str = "https://example.com/",
+    status_code: int = 200,
+    headers: dict[str, str] | None = None,
+) -> type[FakeRequest]:
+    """Build a patchable botasaurus Request substitute returning one canned response."""
+    response = FakeHttpResponse(
+        text=html,
+        status_code=status_code,
+        headers=headers if headers is not None else {"content-type": "text/html"},
+        url=url,
+    )
+    return type("CannedFakeRequest", (FakeRequest,), {"response": response})
+
+
 class ArticleDriver(FakeDriver):
     ARTICLE_HTML = (
         "<html><body><article><h1>Headline</h1>"
