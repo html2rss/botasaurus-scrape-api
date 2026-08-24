@@ -59,9 +59,12 @@ class ScraperEngine:
             self._active_request_ids.discard(request_id)
 
     def prune_runtime_dirs(self) -> int:
+        # Hold the lock for the full prune so a newly registered request cannot
+        # create its runtime dir and then be deleted from a stale snapshot.
         with self._active_request_ids_lock:
-            active = set(self._active_request_ids)
-        return prune_orphan_runtime_dirs(self.runtime_root, active)
+            return prune_orphan_runtime_dirs(
+                self.runtime_root, set(self._active_request_ids)
+            )
 
     def prepare_runtime_for_request(self) -> None:
         if runtime_root_low_on_space(
@@ -82,10 +85,19 @@ class ScraperEngine:
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         resolved_request_id = request_id or str(uuid.uuid4())
-        started_monotonic = time.monotonic()
+        now = time.monotonic()
+        # When the API supplies a deadline (computed at submission), budget math
+        # must use that submission start — not the post-queue worker clock — or
+        # a long queue wait grants a second full timeout.
+        if deadline_monotonic is not None:
+            started_monotonic = (
+                deadline_monotonic - self.settings.scrape_timeout_seconds
+            )
+        else:
+            started_monotonic = now
         progress = progress or ScrapeProgress()
 
-        if deadline_monotonic and started_monotonic >= deadline_monotonic:
+        if deadline_monotonic is not None and now >= deadline_monotonic:
             progress.mark(TimeoutPhase.QUEUE)
             return build_error(
                 target_url,

@@ -8,6 +8,7 @@ from app.engine.driver_capabilities import (
     DriverProtocol,
     call_if_available,
     call_quietly,
+    resolve_callable,
 )
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
@@ -50,11 +51,7 @@ def resolve_strategies(mode: NavigationMode, max_retries: int) -> list[Navigatio
 
 
 def _driver_method(driver: DriverProtocol, *names: str):
-    for name in names:
-        method = getattr(driver, name, None)
-        if callable(method):
-            return method
-    return driver.get
+    return resolve_callable(driver, *names) or driver.get
 
 
 def navigate(

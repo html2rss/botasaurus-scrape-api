@@ -75,6 +75,17 @@ class DriverProtocol(Protocol):
     def _tab(self) -> CdpTabProtocol: ...
 
 
+def resolve_callable(
+    driver: DriverProtocol | DriverTabProtocol, *names: str
+) -> Any | None:
+    """Return the first callable attribute among ``names``, else ``None``."""
+    for name in names:
+        method = getattr(driver, name, None)
+        if callable(method):
+            return method
+    return None
+
+
 def call_if_available[T](
     driver: DriverProtocol,
     name: str,
@@ -83,8 +94,8 @@ def call_if_available[T](
     default: T = None,  # type: ignore[assignment]
     **kwargs: Any,
 ) -> T:
-    method = getattr(driver, name, None)
-    if not callable(method):
+    method = resolve_callable(driver, name)
+    if method is None:
         return default
     try:
         return cast(T, method(*args, **kwargs))
@@ -96,8 +107,8 @@ def call_if_available[T](
 def call_quietly(
     driver: DriverProtocol | DriverTabProtocol, name: str, /, *args: Any, **kwargs: Any
 ) -> None:
-    method = getattr(driver, name, None)
-    if not callable(method):
+    method = resolve_callable(driver, name)
+    if method is None:
         return
     try:
         method(*args, **kwargs)

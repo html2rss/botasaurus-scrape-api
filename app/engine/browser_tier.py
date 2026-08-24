@@ -108,23 +108,39 @@ def run_browser_tier(
         else None
     )
 
-    driver = cast(
-        DriverProtocol,
-        Driver(
-            headless=payload.headless,
-            enable_xvfb_virtual_display=not payload.headless,
-            proxy=payload.proxy,
-            profile=str(session.profile_dir),
-            tiny_profile=True,
-            block_images=payload.block_images,
-            block_images_and_css=payload.block_images_and_css,
-            wait_for_complete_page_load=payload.wait_for_complete_page_load,
-            user_agent=payload.effective_user_agent,
-            window_size=driver_window_size,
-            lang=payload.lang,
-            remove_default_browser_check_argument=True,
-        ),
-    )
+    try:
+        driver = cast(
+            DriverProtocol,
+            Driver(
+                headless=payload.headless,
+                enable_xvfb_virtual_display=not payload.headless,
+                proxy=payload.proxy,
+                profile=str(session.profile_dir),
+                tiny_profile=True,
+                block_images=payload.block_images,
+                block_images_and_css=payload.block_images_and_css,
+                wait_for_complete_page_load=payload.wait_for_complete_page_load,
+                user_agent=payload.effective_user_agent,
+                window_size=driver_window_size,
+                lang=payload.lang,
+                remove_default_browser_check_argument=True,
+            ),
+        )
+    except Exception as exc:
+        is_timeout = is_timeout_exception(exc)
+        return build_error(
+            target_url,
+            str(exc),
+            request_id=request_id,
+            attempts=0,
+            render_ms=elapsed_ms(started_monotonic),
+            error_category=(
+                ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
+            ),
+            execution_tier=ExecutionTier.BROWSER_DRIVER,
+            timeout_phase=TimeoutPhase.BOOT,
+        )
+
     session.driver = driver
     configure_driver(driver, payload, target_url, collector=collector)
     browser_ready_monotonic = time.monotonic()

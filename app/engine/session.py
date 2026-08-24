@@ -24,7 +24,11 @@ class ScrapeSession:
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
-        self.engine.prepare_runtime_for_request()
+        try:
+            self.engine.prepare_runtime_for_request()
+        except Exception:
+            self.engine.unregister_request_id(self.request_id)
+            raise
         return self
 
     def prepare_profile_dirs(self) -> None:

@@ -157,6 +157,40 @@ class IsolationRegressionTests(unittest.TestCase):
                 engine.unregister_request_id(request_id)
             self.assertNotIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
 
+    def test_session_unregisters_when_prepare_runtime_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            request_id = "req-prepare-fail"
+            with (
+                patch.object(
+                    engine,
+                    "prepare_runtime_for_request",
+                    side_effect=OSError("boom"),
+                ),
+                self.assertRaises(OSError),
+                ScrapeSession(engine, request_id),
+            ):
+                pass
+            self.assertNotIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
+
+    def test_prune_keeps_registered_request_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+            orphan = runtime_root / "orphan"
+            orphan.mkdir()
+            live = runtime_root / "live-req"
+            live.mkdir()
+            engine.register_request_id("live-req")
+            try:
+                removed = engine.prune_runtime_dirs()
+            finally:
+                engine.unregister_request_id("live-req")
+
+            self.assertEqual(removed, 1)
+            self.assertFalse(orphan.exists())
+            self.assertTrue(live.is_dir())
+
 
 if __name__ == "__main__":
     unittest.main()
