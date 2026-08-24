@@ -71,8 +71,9 @@ Conventions:
 - Domain logic stays out of route handlers and Pydantic shells.
 - Typed exceptions over string-matching (`RequestIdCollisionError`, not `RuntimeError` message checks).
 - `NavigationMode` end-to-end in engine code; no raw strategy strings outside enum conversion boundaries.
-- Optional Botasaurus driver methods go through `driver_capabilities.call_if_available` only; do not ad-hoc `getattr(driver, ...)`.
+- Optional Botasaurus driver methods go through `driver_capabilities.call_if_available` / `resolve_callable` only; do not ad-hoc `getattr(driver, ...)`.
 - OpenAPI route examples come from `openapi_examples.py` model instances, not hand-typed dicts.
+- Route modules expose `create_router()` factories included from `create_app()` **after** `configure_openapi(settings)`, so timeout-dependent response metadata is not frozen on first import.
 - Botasaurus/CDP imports are lazy inside tier entrypoints (`run_request_tier`, `run_browser_tier`, XhrCollector methods), not at app import time.
 
 ## Singleton + Settings Threading

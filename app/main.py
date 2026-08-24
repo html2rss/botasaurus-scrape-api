@@ -47,8 +47,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     register_exception_handlers(app)
-    app.include_router(health.router)
-    app.include_router(scrape.router)
+    app.include_router(health.create_router())
+    app.include_router(scrape.create_router())
 
     return app
 

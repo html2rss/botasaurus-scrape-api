@@ -18,14 +18,15 @@ from app.schemas.enums import ExecutionMode, NavigationMode
 
 logger = get_logger()
 
+_WAIT_TIMEOUT_DESCRIPTION = (
+    "Selector wait timeout in seconds. Values outside "
+    "[1, SCRAPE_WORK_TIMEOUT_SECONDS] are clamped into that "
+    "range so scrape still runs; they are not rejected with 422."
+)
 
-def _wait_timeout_field_description() -> str:
-    work_cap = get_settings().scrape_work_timeout_seconds
-    return (
-        "Selector wait timeout in seconds. Values outside "
-        f"[1, {work_cap}] are clamped into that "
-        "range so scrape still runs; they are not rejected with 422."
-    )
+
+def _default_wait_timeout_seconds() -> int:
+    return min(15, get_settings().scrape_work_timeout_seconds)
 
 
 class WindowSize(BaseModel):
@@ -78,9 +79,10 @@ class ScrapeRequest(BaseModel):
         examples=["h1"],
     )
     wait_timeout_seconds: int = Field(
-        default=15,
-        description=_wait_timeout_field_description(),
+        default_factory=_default_wait_timeout_seconds,
+        description=_WAIT_TIMEOUT_DESCRIPTION,
         examples=[15],
+        json_schema_extra={"default": 15},
     )
     scroll: bool = Field(
         default=False,

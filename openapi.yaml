@@ -423,9 +423,9 @@ components:
         wait_timeout_seconds:
           type: integer
           title: Wait Timeout Seconds
-          description: Selector wait timeout in seconds. Values outside [1, 30] are
-            clamped into that range so scrape still runs; they are not rejected with
-            422.
+          description: Selector wait timeout in seconds. Values outside [1, SCRAPE_WORK_TIMEOUT_SECONDS]
+            are clamped into that range so scrape still runs; they are not rejected
+            with 422.
           default: 15
           examples:
           - 15
