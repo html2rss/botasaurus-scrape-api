@@ -7,7 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi==0.141.1",
     "uvicorn==0.52.4",
-    "pydantic-settings==2.13.1",
+    "pydantic-settings==2.14.2",
     "sentry-sdk==2.68.0",
     "botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a",
 ]
