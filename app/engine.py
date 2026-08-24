@@ -1,6 +1,7 @@
 # app/engine.py
 from __future__ import annotations
 
+import errno
 import logging
 import shutil
 import threading
@@ -15,6 +16,7 @@ from botasaurus.request import Request
 
 from app.detector import ChallengeAssessment, ChallengeDetector
 from app.metadata import MetadataExtractor
+from app.runtime_cleanup import prune_orphan_runtime_dirs, runtime_root_low_on_space
 from app.schemas import (
     DEFAULT_SCRAPE_TIMEOUT_SECONDS,
     DEFAULT_SCRAPE_WORK_TIMEOUT_SECONDS,
@@ -220,11 +222,23 @@ class ScrapeSession:
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
+        self.engine.prepare_runtime_for_request()
         return self
 
     def prepare_profile_dirs(self) -> None:
-        self.runtime_dir.mkdir(parents=True, exist_ok=False)
-        self.profile_dir.mkdir(parents=True, exist_ok=False)
+        last_error: OSError | None = None
+        for attempt in range(2):
+            try:
+                self.runtime_dir.mkdir(parents=True, exist_ok=False)
+                self.profile_dir.mkdir(parents=True, exist_ok=False)
+                return
+            except OSError as exc:
+                last_error = exc
+                if exc.errno != errno.ENOSPC or attempt > 0:
+                    raise
+                self.engine.prune_runtime_dirs()
+        if last_error is not None:
+            raise last_error
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:
@@ -256,6 +270,17 @@ class ScraperEngine:
     def unregister_request_id(self, request_id: str) -> None:
         with self._active_request_ids_lock:
             self._active_request_ids.discard(request_id)
+
+    def prune_runtime_dirs(self) -> int:
+        with self._active_request_ids_lock:
+            active = set(self._active_request_ids)
+        return prune_orphan_runtime_dirs(self.runtime_root, active)
+
+    def prepare_runtime_for_request(self) -> None:
+        if runtime_root_low_on_space(self.runtime_root):
+            logger.info("runtime_root_low_on_space path=%s", self.runtime_root)
+        self.prune_runtime_dirs()
+        self.runtime_root.mkdir(parents=True, exist_ok=True)
 
     @classmethod
     def resolve_strategies(cls, mode: NavigationMode, max_retries: int) -> list[str]:
@@ -513,7 +538,24 @@ class ScraperEngine:
             TimeoutPhase.BOOT,
             execution_tier=ExecutionTier.BROWSER_DRIVER,
         )
-        session.prepare_profile_dirs()
+        try:
+            session.prepare_profile_dirs()
+        except OSError as exc:
+            render_ms = int((time.monotonic() - started_monotonic) * 1000)
+            if exc.errno == errno.ENOSPC:
+                detail = "Scrape runtime storage full"
+            else:
+                detail = "Scrape runtime storage unavailable"
+            return _terminal_error(
+                target_url,
+                f"{detail}: {exc}",
+                request_id=request_id,
+                attempts=0,
+                render_ms=render_ms,
+                error_category=ErrorCategory.NAVIGATION_ERROR,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                timeout_phase=TimeoutPhase.BOOT,
+            )
 
         strategies = self.resolve_strategies(
             payload.navigation_mode, payload.max_retries

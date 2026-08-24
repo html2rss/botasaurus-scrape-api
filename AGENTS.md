@@ -36,6 +36,7 @@
   - close browser driver
   - delete request runtime dir
   - remove in-memory active request id
+- Before each scrape, prune orphaned runtime dirs not tied to an active request id; ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
 - Keep request-id collision/invariant guard (`_active_request_ids`) intact.
 - `driver.requests.get` metadata is best-effort; metadata failure must not fail HTML success.
 - Keep strategy engine behavior:

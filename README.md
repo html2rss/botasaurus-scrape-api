@@ -312,6 +312,7 @@ Exception:
 - Browser profile/session artifacts are request-scoped only.
 - No cache/profile/driver reuse across requests.
 - Cleanup is enforced in `finally`: driver close + runtime directory delete + request-id in-memory state scrub.
+- Before each scrape, orphaned runtime dirs (not tied to an active request id) are pruned; ENOSPC triggers an extra prune-and-retry. Mount `/tmp/scrape` on tmpfs in production (see html2rss-web `docker-compose.yml`).
 
 ## Environment Variables
 
@@ -335,6 +336,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. |
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
+| `SCRAPE_RUNTIME_MIN_FREE_BYTES` | `268435456` (256 MiB) | Prune orphan runtime dirs when free space drops below this threshold. |
 
 ## Example Calls
 

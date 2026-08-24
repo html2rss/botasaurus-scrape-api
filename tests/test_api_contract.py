@@ -300,6 +300,85 @@ class MainUnitTests(unittest.TestCase):
             self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
             self.assertEqual(list(runtime_root.iterdir()), [])
 
+    def test_prepare_profile_dirs_enospc_returns_navigation_error(self):
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            engine = ScraperEngine(runtime_root=runtime_root)
+
+            def boom_mkdir(*_args, exist_ok=False, **_kwargs):
+                if exist_ok:
+                    return None
+                raise OSError(28, "No space left on device")
+
+            with (
+                patch("app.engine.Driver", _FakeDriver),
+                patch.object(Path, "mkdir", side_effect=boom_mkdir),
+            ):
+                result = engine.execute(payload)
+
+            self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
+            self.assertIn("runtime storage full", result.error)
+            self.assertEqual(result.diagnostics.timeout_phase.value, "boot")
+            self.assertEqual(list(runtime_root.iterdir()), [])
+
+    def test_prune_orphan_runtime_dirs_before_new_request(self):
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            orphan = runtime_root / "stale-request"
+            orphan.mkdir()
+            (orphan / "profile").mkdir()
+
+            engine = ScraperEngine(runtime_root=runtime_root)
+            with patch("app.engine.Driver", _FakeDriver):
+                result = engine.execute(payload)
+
+            self.assertIsInstance(result, ScrapeSuccess)
+            self.assertEqual(
+                [entry.name for entry in runtime_root.iterdir()],
+                [],
+            )
+
+    def test_prune_orphan_runtime_dirs_before_http_request(self):
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode="request",
+        )
+        html = "<html><body><h1>Example Domain</h1></body></html>"
+        _FakeRequest.response = _FakeHttpResponse(
+            text=html,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            orphan = runtime_root / "stale-request"
+            orphan.mkdir()
+            (orphan / "profile").mkdir()
+
+            engine = ScraperEngine(runtime_root=runtime_root)
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(payload)
+
+            self.assertEqual(result.html, html)
+            self.assertFalse(orphan.exists())
+            self.assertEqual(list(runtime_root.iterdir()), [])
+
     def test_run_scrape_forwards_driver_kwargs(self):
         _CaptureDriver.last_init_kwargs = None
         payload = ScrapeRequest(
