@@ -1,10 +1,14 @@
 # tests/test_timeout_phase.py
 from __future__ import annotations
 
+import tempfile
 import time
 import unittest
+from pathlib import Path
+from typing import ClassVar
 from unittest.mock import patch
 
+from app.engine import ScraperEngine
 from app.main import handler_timeout_error
 from app.schemas import (
     ExecutionMode,
@@ -14,6 +18,73 @@ from app.schemas import (
     TimeoutPhase,
 )
 from app.scrape_progress import ScrapeProgress
+
+
+class _FakeMetadataResponse:
+    status_code = 200
+    headers: ClassVar[dict[str, str]] = {"content-type": "text/html"}
+    url = "https://example.com/"
+
+
+class _FakeRequests:
+    def get(self, _url):
+        return _FakeMetadataResponse()
+
+
+class _PhaseProbeDriver:
+    """Records progress phase at Driver construction time."""
+
+    construction_phase: TimeoutPhase | None = None
+    progress: ScrapeProgress | None = None
+
+    def __init__(self, *args, **kwargs):
+        del args, kwargs
+        progress = type(self).progress
+        type(self).construction_phase = (
+            progress.snapshot().phase if progress is not None else None
+        )
+        self.page_html = "<html><body><h1>Example Domain</h1></body></html>"
+        self.current_url = "https://example.com/"
+        self.requests = _FakeRequests()
+
+    def get(self, *_args, **_kwargs):
+        return None
+
+    def google_get(self, *_args, **_kwargs):
+        return None
+
+    def organic_get(self, *_args, **_kwargs):
+        return None
+
+    def wait_for_element(self, *_args, **_kwargs):
+        return None
+
+    def scroll_to_bottom(self):
+        return None
+
+    def sleep(self, *_args, **_kwargs):
+        return None
+
+    def close(self):
+        return None
+
+
+class _FakeHttpResponse:
+    def __init__(self, *, text, status_code, headers, url):
+        self.text = text
+        self.status_code = status_code
+        self.headers = headers
+        self.url = url
+
+
+class _FakeRequest:
+    response = None
+
+    def get(self, *_args, **_kwargs):
+        return type(self).response
+
+    def close(self):
+        return None
 
 
 class ScrapeProgressTests(unittest.TestCase):
@@ -82,10 +153,8 @@ class HandlerTimeoutErrorTests(unittest.TestCase):
         self.assertGreaterEqual(result.diagnostics.render_ms, 0)
 
 
-class EngineQueueTimeoutPhaseTests(unittest.TestCase):
+class EngineProgressMarkTests(unittest.TestCase):
     def test_execute_queue_timeout_sets_phase(self):
-        from app.engine import ScraperEngine
-
         engine = ScraperEngine()
         progress = ScrapeProgress()
         payload = ScrapeRequest(
@@ -102,6 +171,58 @@ class EngineQueueTimeoutPhaseTests(unittest.TestCase):
         self.assertEqual(result.error_category.value, "timeout")
         self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.QUEUE)
         self.assertEqual(progress.snapshot().phase, TimeoutPhase.QUEUE)
+
+    def test_browser_tier_marks_boot_before_driver_then_work(self):
+        progress = ScrapeProgress()
+        _PhaseProbeDriver.progress = progress
+        _PhaseProbeDriver.construction_phase = None
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode=ExecutionMode.BROWSER,
+            navigation_mode=NavigationMode.GET,
+            max_retries=0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Driver", _PhaseProbeDriver):
+                result = engine.execute(
+                    payload, request_id="req-boot-mark", progress=progress
+                )
+
+        self.assertIsNone(getattr(result, "error", None))
+        self.assertEqual(_PhaseProbeDriver.construction_phase, TimeoutPhase.BOOT)
+        snap = progress.snapshot()
+        self.assertEqual(snap.phase, TimeoutPhase.WORK)
+        self.assertEqual(snap.attempts, 1)
+        self.assertEqual(snap.strategy_used, NavigationMode.GET)
+        self.assertEqual(snap.execution_tier, ExecutionTier.BROWSER_DRIVER)
+
+    def test_request_tier_marks_work_with_attempt(self):
+        progress = ScrapeProgress()
+        _FakeRequest.response = _FakeHttpResponse(
+            text="<html><body><h1>Example Domain</h1></body></html>",
+            status_code=200,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+        payload = ScrapeRequest(
+            url="https://example.com",
+            execution_mode=ExecutionMode.REQUEST,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(runtime_root=Path(tmp))
+            with patch("app.engine.Request", _FakeRequest):
+                result = engine.execute(
+                    payload, request_id="req-http-mark", progress=progress
+                )
+
+        self.assertIsNone(getattr(result, "error", None))
+        snap = progress.snapshot()
+        self.assertEqual(snap.phase, TimeoutPhase.WORK)
+        self.assertEqual(snap.attempts, 1)
+        self.assertEqual(snap.execution_tier, ExecutionTier.HTTP_REQUEST)
 
 
 class HandlerTimeoutHttpTests(unittest.TestCase):
