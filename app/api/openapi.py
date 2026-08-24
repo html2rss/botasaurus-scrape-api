@@ -17,7 +17,7 @@ from app.schemas.response import ScrapeError
 @dataclass(frozen=True, slots=True)
 class OpenApiMetadata:
     api_description: str
-    json_error_example: dict[str, dict[str, dict]]
+    json_error_example: dict[str, dict[str, dict[str, Any]]]
     scrape_error_responses: dict[int | str, dict[str, Any]]
     health_responses: dict[int | str, dict[str, Any]]
     scrape_success_response: dict[int | str, dict[str, Any]]

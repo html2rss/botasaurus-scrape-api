@@ -25,3 +25,6 @@ class BenchRegressionTests(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("wall_ms_p50=", completed.stdout)
+
+
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false

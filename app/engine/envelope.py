@@ -18,8 +18,6 @@ HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
 def utf8_normalize_html(html: str) -> str:
     if not html:
         return html
-    if not isinstance(html, str):
-        html = str(html)
     try:
         html = html.encode("latin-1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):  # fmt: skip

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Protocol
+from typing import Protocol, cast
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -48,23 +48,24 @@ def test_client(
     execute_side_effect: ExecuteSideEffect | None = None,
 ) -> Iterator[TestClient]:
     app: FastAPI = create_app()
-    resolved_engine = engine
+    bound_engine: ScraperEngine | _EngineExecuteProxy | None = engine
 
-    if resolved_engine is not None:
+    if bound_engine is not None:
 
-        def _override_engine(request: Request) -> ScraperEngine:
-            return resolved_engine
+        def _override_engine(_request: Request) -> ScraperEngine:
+            return cast(ScraperEngine, bound_engine)
 
         app.dependency_overrides[get_engine] = _override_engine
 
     with TestClient(app) as client:
-        if resolved_engine is None:
-            resolved_engine = client.app.state.engine
+        if bound_engine is None:
+            bound_engine = client.app.state.engine
         if execute_side_effect is not None:
-            resolved_engine = _EngineExecuteProxy(resolved_engine, execute_side_effect)
+            proxy_base = cast(ScraperEngine, bound_engine)
+            bound_engine = _EngineExecuteProxy(proxy_base, execute_side_effect)
 
-            def _override_engine_with_proxy(request: Request) -> ScraperEngine:
-                return resolved_engine  # type: ignore[return-value]
+            def _override_engine_with_proxy(_request: Request) -> ScraperEngine:
+                return cast(ScraperEngine, bound_engine)
 
             app.dependency_overrides[get_engine] = _override_engine_with_proxy
         yield client

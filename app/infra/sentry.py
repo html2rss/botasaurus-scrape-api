@@ -7,7 +7,7 @@ from app.config import SentrySettings, Settings
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
-_INITIALIZED = False
+_initialized = False
 
 
 class SentryEventHint(TypedDict, total=False):
@@ -36,7 +36,7 @@ def is_sentry_enabled(settings: Settings | None = None) -> bool:
 
 def sentry_is_ready() -> bool:
     """Return True when Sentry DSN is set and init succeeded."""
-    return is_sentry_enabled() and _INITIALIZED
+    return is_sentry_enabled() and _initialized
 
 
 def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | None:
@@ -59,7 +59,7 @@ def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | Non
 
 def setup_sentry(settings: Settings | None = None) -> bool:
     """Initialize Sentry when SENTRY_DSN is set. Returns True on success."""
-    global _INITIALIZED
+    global _initialized
 
     from app.config import get_settings
 
@@ -68,7 +68,7 @@ def setup_sentry(settings: Settings | None = None) -> bool:
 
 
 def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> bool:
-    global _INITIALIZED
+    global _initialized
 
     dsn = sentry.dsn.strip()
     if not dsn:
@@ -105,7 +105,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         init_kwargs["profiles_sample_rate"] = profiles_sample_rate
 
     sentry_sdk.init(**init_kwargs)
-    _INITIALIZED = True
+    _initialized = True
 
     logger.info(
         "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
@@ -117,7 +117,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
 
 
 def flush_sentry(timeout: float = 2.0) -> None:
-    if not _INITIALIZED:
+    if not _initialized:
         return
     try:
         import sentry_sdk

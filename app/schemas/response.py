@@ -130,12 +130,11 @@ class ScrapeSuccess(BaseModel):
         examples=[None],
     )
     xhr_responses: list[XhrResponse] = Field(
-        default_factory=list,
+        default_factory=lambda: list[XhrResponse](),
         description=(
             "JSON XHR/fetch sub-resource bodies captured on the browser tier "
             "(empty on the HTTP-request tier)."
         ),
-        examples=[[]],
     )
     diagnostics: ScrapeDiagnostics = Field(
         description="Per-request tracing, strategy, timing, and challenge signals.",

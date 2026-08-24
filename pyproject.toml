@@ -34,16 +34,8 @@ pythonVersion = "3.14"
 venvPath = "."
 venv = ".venv"
 stubPath = "typings"
-typeCheckingMode = "standard"
+typeCheckingMode = "strict"
 include = ["app", "tests"]
 exclude = [".venv"]
-reportMissingTypeStubs = false
+reportMissingTypeStubs = true
 reportMissingImports = false
-
-[[tool.pyright.executionEnvironments]]
-root = "tests"
-reportArgumentType = "none"
-reportAttributeAccessIssue = "none"
-reportOptionalSubscript = "none"
-reportOptionalMemberAccess = "none"
-reportFunctionMemberAccess = "none"

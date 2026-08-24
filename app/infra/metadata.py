@@ -36,9 +36,11 @@ class MetadataExtractor:
         reqs = getattr(driver, "requests", None)
         if not isinstance(reqs, (list, tuple)):
             return None, None, None
-        for req in reversed(reqs):
+        for req in reversed(cast(list[object], reqs)):
             resp = getattr(req, "response", None)
-            status_code = getattr(resp, "status_code", None) if resp is not None else None
+            status_code = (
+                getattr(resp, "status_code", None) if resp is not None else None
+            )
             if status_code is not None:
                 headers = getattr(resp, "headers", None)
                 hdr_dict = (
@@ -62,7 +64,7 @@ class MetadataExtractor:
         message = envelope.get("message")
         if not isinstance(message, dict):
             return None
-        return cast(CdpResponseReceivedMessage, message)
+        return message
 
     @classmethod
     def extract_from_cdp_logs(
@@ -78,11 +80,8 @@ class MetadataExtractor:
             if not isinstance(logs, list):
                 return None, None, None
 
-            for entry in reversed(logs):
-                if not isinstance(entry, dict):
-                    continue
-                log_entry = cast(CdpPerformanceLogEntry, entry)
-                raw_msg = log_entry.get("message", "{}")
+            for entry in reversed(cast(list[CdpPerformanceLogEntry], logs)):
+                raw_msg = entry.get("message", "{}")
                 msg = cls._parse_cdp_log_message(raw_msg)
                 if msg is None or msg.get("method") != "Network.responseReceived":
                     continue

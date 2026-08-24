@@ -6,14 +6,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, ClassVar
 
-from app.engine.driver_capabilities import (
-    CdpTabProtocol,
-    DriverProtocol,
-    DriverRequestProtocol,
-    DriverRequestResponseProtocol,
-    DriverTabProtocol,
-)
-
 
 class FakeMetadataResponse:
     status_code = 200
@@ -37,13 +29,13 @@ class FakeDriverTab:
 class FakeDriver:
     page_html: str | None
     current_url: str | None
-    requests: list[DriverRequestProtocol]
+    requests: list[object]
 
     def __init__(self, *args: object, **kwargs: Any) -> None:
         del args
         self.page_html = "<html><body><h1>Example Domain</h1></body></html>"
         self.current_url = "https://example.com/"
-        self.requests = [FakeRequests()]  # type: ignore[list-item]
+        self.requests = [FakeRequests()]
         self._raise_wait = kwargs.pop("raise_wait", False)
         self.scrolled = False
         self._tab = FakeDriverTab()
@@ -193,21 +185,3 @@ class FakeTab:
         self, _event_type: type[object], handler: Callable[..., None]
     ) -> None:
         self.finished_handler = handler
-
-
-def assert_driver_protocol(driver: FakeDriver) -> DriverProtocol:
-    return driver
-
-
-def assert_cdp_tab_protocol(tab: FakeTab) -> CdpTabProtocol:
-    return tab
-
-
-def assert_driver_tab_protocol(tab: FakeDriverTab) -> DriverTabProtocol:
-    return tab
-
-
-def assert_driver_request_response(
-    response: FakeMetadataResponse,
-) -> DriverRequestResponseProtocol:
-    return response

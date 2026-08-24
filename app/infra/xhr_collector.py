@@ -56,8 +56,10 @@ class XhrCollector:
     def _allowlisted_headers(cls, headers: object) -> dict[str, str]:
         """Keep only content-type; drop Set-Cookie and other headers."""
         allowed: dict[str, str] = {}
-        header_items = headers if isinstance(headers, dict) else {}
-        for key, value in header_items.items():
+        header_map = cast(
+            dict[object, object], headers if isinstance(headers, dict) else {}
+        )
+        for key, value in header_map.items():
             normalized = str(key).lower()
             if normalized in cls._HEADER_ALLOWLIST:
                 allowed[normalized] = str(value)
@@ -106,9 +108,10 @@ class XhrCollector:
 
         for rid, meta in jobs:
             request_id = meta.pop("request_id", rid)
-            normalized_request_id = (
-                request_id if isinstance(request_id, (str, int)) else rid
-            )
+            if isinstance(request_id, int):
+                normalized_request_id = request_id
+            else:
+                normalized_request_id = request_id or rid
             body = self._fetch_body(tab, normalized_request_id, rid)
             if body is None:
                 continue

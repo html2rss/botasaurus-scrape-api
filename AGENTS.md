@@ -144,9 +144,11 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 
 ## Types
 
-- `make typecheck` runs `pyright app tests` and is part of `make check`.
-- Engine driver seams use `DriverProtocol` in `driver_capabilities.py`; cast vendor `Driver` at construction when needed.
-- Test-only pyright relaxations live in `pyproject.toml` `[[tool.pyright.executionEnvironments]]` for `tests/`.
+- `make typecheck` runs **`pyright` strict** on `app tests` and is part of `make check`.
+- Vendor seams: local stubs in `typings/` (`stubPath` in `pyproject.toml`); CDP shapes in `app/infra/cdp_types.py`.
+- Engine driver seams use `DriverProtocol` / `CdpTabProtocol` in `driver_capabilities.py`; cast vendor `Driver` at construction when needed.
+- Tests construct `ScrapeRequest` via `tests/support/factories.py` (`scrape_request`, `example_url`); fakes implement protocol shapes in `tests/support/fakes.py`.
+- Residual policy and file-level test directives: `docs/typing-residuals.md`.
 
 ## Safety
 

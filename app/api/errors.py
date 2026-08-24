@@ -22,6 +22,7 @@ class ValidationErrorItem(TypedDict, total=False):
     loc: tuple[Any, ...] | list[Any]
     msg: str
     type: str
+    input: Any
 
 
 def schema_field_from_loc(loc: tuple[Any, ...] | list[Any]) -> str:
@@ -38,8 +39,10 @@ def first_schema_field(errors: list[ValidationErrorItem]) -> str:
 
 
 def url_from_validation_body(body: Any) -> str:
-    if isinstance(body, dict) and body.get("url") is not None:
-        return str(body["url"])
+    if isinstance(body, dict):
+        url_value = cast(dict[str, Any], body).get("url")
+        if url_value is not None:
+            return str(url_value)
     return ""
 
 
@@ -48,8 +51,10 @@ def validation_error_message(errors: list[ValidationErrorItem]) -> str:
         return "Request schema validation failed"
     parts: list[str] = []
     for err in errors:
-        field = schema_field_from_loc(err.get("loc") or ())
-        parts.append(f"{field}: {err.get('msg') or 'invalid'}")
+        loc = err.get("loc") or ()
+        field = schema_field_from_loc(loc)
+        message = str(err.get("msg") or "invalid")
+        parts.append(f"{field}: {message}")
     return "; ".join(parts)
 
 

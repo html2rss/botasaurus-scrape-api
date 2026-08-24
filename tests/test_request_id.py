@@ -1,5 +1,7 @@
+# pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import unittest
 import uuid
+from typing import cast
 from unittest.mock import patch
 
 from app.infra.request_id import resolve_request_id
@@ -100,7 +102,7 @@ class ResolveRequestIdTests(unittest.TestCase):
                     return_value=uuid.UUID(FALLBACK_UUID),
                 ):
                     request_id, used_fallback = resolve_request_id(
-                        case["inbound"], host="example.com"
+                        cast("str | None", case["inbound"]), host="example.com"
                     )
 
                 self.assertEqual(request_id, case["expected_id"])
