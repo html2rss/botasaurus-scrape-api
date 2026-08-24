@@ -15,6 +15,7 @@ from app.schemas import (
     NavigationMode,
     ScrapeDiagnostics,
     ScrapeError,
+    TimeoutPhase,
 )
 
 
@@ -94,6 +95,34 @@ class OpsTelemetryTests(unittest.TestCase):
                 ["botasaurus-scrape-api", "timeout", "example.com"],
             )
             mock_scope.set_tag.assert_any_call("http_status", "504")
+
+    def test_report_terminal_outcome_tags_timeout_phase(self):
+        result = _scrape_error(category=ErrorCategory.TIMEOUT)
+        result.diagnostics.timeout_phase = TimeoutPhase.BOOT
+        mock_scope = MagicMock()
+        with (
+            patch("app.ops_telemetry.sentry_is_ready", return_value=True),
+            patch("sentry_sdk.new_scope") as mock_new_scope,
+            patch("sentry_sdk.capture_message") as mock_capture,
+        ):
+            mock_new_scope.return_value.__enter__.return_value = mock_scope
+            report_terminal_outcome(result, http_status=504)
+
+            (message,) = mock_capture.call_args.args
+            self.assertIn("timeout/boot", message)
+            mock_scope.set_tag.assert_any_call("timeout_phase", "boot")
+            self.assertEqual(
+                mock_scope.fingerprint,
+                ["botasaurus-scrape-api", "timeout", "example.com"],
+            )
+            mock_scope.set_context.assert_called_once_with(
+                "scrape",
+                {
+                    "request_id": "req-123",
+                    "attempts": 2,
+                    "timeout_phase": "boot",
+                },
+            )
 
     def test_report_terminal_outcome_skips_challenge_block(self):
         result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)

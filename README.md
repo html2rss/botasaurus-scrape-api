@@ -105,7 +105,7 @@ Human examples follow. OpenAPI 2.0.0 is a breaking wire cut from 1.x:
 - `scroll_to_bottom` → `scroll` (scroll means scroll-to-bottom / lazy-load)
 - `window_size: [w, h]` → `{ "width": w, "height": h }`
 - `blocked_detected` / `challenge_detected` / `detected_challenge` → `diagnostics.challenge.{blocked,detected,marker}`
-- `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier` → `diagnostics.*`
+- `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier`, optional `timeout_phase` → `diagnostics.*`
 - error bodies no longer include `html`; 400/422 `error_category` is `validation`
 - schema names `ScrapeResponse` → `ScrapeSuccess` + `ScrapeError`
 
@@ -251,9 +251,10 @@ Field behavior:
 - `diagnostics.render_ms`: elapsed render/runtime milliseconds.
 - `diagnostics.execution_tier`: `http_request` or `browser_driver`.
 - `diagnostics.challenge`: anti-bot assessment (`blocked`, `detected`, `marker`), or `null` when detection did not run.
+- `diagnostics.timeout_phase`: on `error_category=timeout` only — which stage burned the budget: `queue` (threadpool wait), `boot` (browser/driver start), or `work` (navigate/wait/scroll). `null` on non-timeout outcomes.
 - `xhr_responses`: always-on additive list of JSON XHR/fetch sub-resource bodies captured during the browser tier (empty for HTTP-request tier). Each entry is `{url, status_code, headers, body}`. `headers` keep only `content-type` (Set-Cookie and other headers are dropped). Caps: at most 20 responses, 500 KB per body, 2 MB aggregate across bodies. Main document responses are excluded. Collector state is reset between strategy retries so challenge interstitials do not pollute a later successful attempt. Candidate filtering for article-likeness is a client concern.
 - `error_category`:
-  - `timeout`
+  - `timeout` — outer handler budget, queue wait, or a tier exception whose message contains `timeout` (browser and request tiers). Those tier timeouts also set `diagnostics.timeout_phase` (`boot`/`work`; request-tier timeouts are `work`).
   - `challenge_block`
   - `navigation_error`
   - `metadata_error`

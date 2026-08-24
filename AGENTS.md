@@ -14,7 +14,7 @@
 - Success `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `metadata_error`, `xhr_responses`, `diagnostics`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
 - Error `/scrape` fields: `url`, `error`, `error_category`, `diagnostics`. No `html`.
-- `diagnostics`: `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier`, `challenge` (`blocked`, `detected`, `marker`).
+- `diagnostics`: `request_id`, `attempts`, `strategy_used`, `render_ms`, `execution_tier`, `challenge` (`blocked`, `detected`, `marker`), optional `timeout_phase` (`queue` | `boot` | `work`) on timeout outcomes.
 - Request options: `execution_mode`, `navigation_mode`, `max_retries`, `wait_for_selector`, `wait_timeout_seconds`, `scroll`, `block_images`, `block_images_and_css`, `block_trackers`, `wait_for_complete_page_load`, `headers`, `cookies`, `user_agent`, `window_size` (`{width, height}`), `lang`, `headless`, `proxy`. `scroll` means scroll-to-bottom / lazy-load. No `scroll_to_bottom`.
 - `wait_timeout_seconds` outside `[1, SCRAPE_WORK_TIMEOUT_SECONDS]` (default 30) is clamped into that range so `/scrape` still runs; remaining schema 422 bodies use the scrape error envelope (`url`, `error`, `error_category`, `diagnostics`), not FastAPI `detail`. Do not advertise `minimum`/`maximum` as 422.
 - `error_category`: `timeout`, `challenge_block`, `navigation_error`, `metadata_error`, `validation`. 400/422 use `validation`.

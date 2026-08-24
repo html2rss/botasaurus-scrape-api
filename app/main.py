@@ -31,8 +31,10 @@ from app.schemas import (
     ScrapeError,
     ScrapeRequest,
     ScrapeSuccess,
+    TimeoutPhase,
     validation_error,
 )
+from app.scrape_progress import ScrapeProgress
 from app.security import UrlGuard
 from app.sentry import flush_sentry, setup_sentry
 
@@ -124,8 +126,19 @@ _SCRAPE_ERROR_RESPONSES = {
             "application/json": {
                 "example": {
                     **SCRAPE_ERROR_EXAMPLE,
-                    "error": f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} seconds",
+                    "error": (
+                        f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} "
+                        "seconds (phase=work)"
+                    ),
                     "error_category": "timeout",
+                    "diagnostics": {
+                        **SCRAPE_ERROR_EXAMPLE["diagnostics"],
+                        "attempts": 1,
+                        "strategy_used": "get",
+                        "render_ms": 45012,
+                        "execution_tier": "browser_driver",
+                        "timeout_phase": "work",
+                    },
                 }
             }
         },
@@ -198,6 +211,35 @@ def _validation_error_message(errors: list[Any]) -> str:
 
 def _json(model: ScrapeSuccess | ScrapeError) -> dict[str, Any]:
     return model.model_dump(mode="json")
+
+
+def handler_timeout_error(
+    url: str,
+    *,
+    request_id: str,
+    started_monotonic: float,
+    progress: ScrapeProgress,
+    timeout_seconds: int = DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+) -> ScrapeError:
+    """Build a 504 envelope from thread-visible scrape progress after wait_for fires."""
+    snap = progress.snapshot()
+    phase = snap.phase
+    render_ms = int((time.monotonic() - started_monotonic) * 1000)
+    return ScrapeError(
+        url=url,
+        error=(
+            f"Scrape timed out after {timeout_seconds} seconds (phase={phase.value})"
+        ),
+        error_category=ErrorCategory.TIMEOUT,
+        diagnostics=ScrapeDiagnostics(
+            request_id=request_id,
+            attempts=snap.attempts,
+            strategy_used=snap.strategy_used,
+            render_ms=render_ms,
+            execution_tier=snap.execution_tier,
+            timeout_phase=phase,
+        ),
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -311,6 +353,7 @@ async def scrape(
 
     started_monotonic = time.monotonic()
     deadline_monotonic = started_monotonic + DEFAULT_SCRAPE_TIMEOUT_SECONDS
+    progress = ScrapeProgress()
 
     try:
         loop = asyncio.get_running_loop()
@@ -322,6 +365,7 @@ async def scrape(
                     payload,
                     deadline_monotonic,
                     request_id=request_id,
+                    progress=progress,
                 ),
             ),
             timeout=DEFAULT_SCRAPE_TIMEOUT_SECONDS,
@@ -342,22 +386,20 @@ async def scrape(
         emit_terminal_telemetry(collision_result, http_status=502)
         return JSONResponse(status_code=502, content=_json(collision_result))
     except TimeoutError:
-        render_ms = int((time.monotonic() - started_monotonic) * 1000)
-        timeout_result = ScrapeError(
-            url=target_url,
-            error=f"Scrape timed out after {DEFAULT_SCRAPE_TIMEOUT_SECONDS} seconds",
-            error_category=ErrorCategory.TIMEOUT,
-            diagnostics=ScrapeDiagnostics(
-                request_id=request_id,
-                attempts=0,
-                render_ms=render_ms,
-            ),
+        timeout_result = handler_timeout_error(
+            target_url,
+            request_id=request_id,
+            started_monotonic=started_monotonic,
+            progress=progress,
         )
+        phase = timeout_result.diagnostics.timeout_phase or TimeoutPhase.QUEUE
         logger.warning(
-            "scrape_timeout host=%s mode=%s timeout_seconds=%d",
+            "scrape_timeout host=%s mode=%s timeout_seconds=%d phase=%s attempts=%d",
             urlparse(target_url).hostname,
             payload.navigation_mode,
             DEFAULT_SCRAPE_TIMEOUT_SECONDS,
+            phase.value,
+            timeout_result.diagnostics.attempts,
         )
         emit_terminal_telemetry(timeout_result, http_status=504)
         return JSONResponse(status_code=504, content=_json(timeout_result))

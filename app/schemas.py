@@ -55,6 +55,12 @@ class ErrorCategory(StrEnum):
     VALIDATION = "validation"
 
 
+class TimeoutPhase(StrEnum):
+    QUEUE = "queue"
+    BOOT = "boot"
+    WORK = "work"
+
+
 class WindowSize(BaseModel):
     width: int = Field(
         ge=1,
@@ -116,6 +122,15 @@ class ScrapeDiagnostics(BaseModel):
         default=None,
         description="Anti-bot assessment for this attempt, or null when detection did not run.",
         examples=[{"blocked": False, "detected": False, "marker": None}],
+    )
+    timeout_phase: TimeoutPhase | None = Field(
+        default=None,
+        description=(
+            "When `error_category` is `timeout`, which stage burned the budget: "
+            "`queue` (threadpool wait), `boot` (browser/driver start), or `work` "
+            "(navigate/wait/scroll). Null for non-timeout outcomes."
+        ),
+        examples=["work"],
     )
 
 
