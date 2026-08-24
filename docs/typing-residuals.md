@@ -12,13 +12,24 @@ Pyright runs in **`strict`** mode for `app/` and `tests/`. Baseline before this 
 
 ## Test-module file directives
 
-Unittest modules under `tests/` (not `tests/support/`) carry a file-level directive relaxing rules that fight dynamic mocks and `TestClient` ergonomics without weakening production types:
+Most test modules pass strict pyright with no relaxation. The remaining directives are scoped per module:
+
+| Module | Directive | Why |
+| --- | --- | --- |
+| `tests/api/test_request_schema.py` | full blanket line | dozens of raw-dict payload permutations |
+| `tests/api/test_http_contract.py` | full blanket line | walks untyped `app.openapi()` dict |
+| `tests/infra/test_xhr_collector.py` | full blanket line | drives protected handlers on dynamic CDP doubles |
+| `tests/engine/test_timeout_progress.py` | full blanket line | `__getattr__`-based phase-probe driver |
+| `tests/infra/test_sentry.py` | `reportPrivateUsage=false` | asserts module-private init state |
+| `tests/engine/test_scraper_engine.py` | `reportPrivateUsage=false` | asserts `_active_request_ids` bookkeeping |
+
+The full blanket line is the canonical eleven-rule directive:
 
 ```python
 # pyright: reportMissingParameterType=false, reportUnknownParameterType=false, ...
 ```
 
-**Rationale:** keeps strict checking on real argument/type errors (`reportArgumentType`, `reportReturnType`) while avoiding hundreds of false positives on nested test doubles. Counted as **one policy per test module**, not per-error suppressions.
+**Rationale:** keeps strict checking on real argument/type errors (`reportArgumentType`, `reportReturnType`) while avoiding false positives on nested test doubles. Counted as **one policy per test module**, not per-error suppressions. Do not add the blanket line to new test modules that pass without it.
 
 ## Intentional boundary casts (app)
 

@@ -13,6 +13,7 @@ app/
   constants.py               # SERVICE_NAME and other shared literals
   config.py                  # Settings + nested SentrySettings; single env source of truth
   exceptions.py              # domain exceptions (e.g. RequestIdCollisionError)
+  logging_config.py          # setup_logging + get_logger(); single owner of logger name
   api/
     deps.py                  # FastAPI Depends: settings, engine, executor, ScrapeService
     errors.py                # 422 + 500 handlers → scrape error envelope
@@ -20,10 +21,11 @@ app/
     openapi_examples.py      # OpenAPI examples built from Pydantic model instances
     routes/                  # thin HTTP handlers (health, scrape)
   domain/
-    scrape_service.py        # validation, threadpool orchestration, status mapping
+    scrape_service.py        # request-id resolution, URL guardrails, threadpool execution, status mapping
   engine/
     orchestrator.py          # ScraperEngine.execute
     session.py               # ScrapeSession lifecycle
+    budget.py                # wall-clock budget math shared across tiers (elapsed_ms, step budgets)
     request_tier.py          # HTTP/curl_cffi path
     browser_tier.py          # Chromium path
     strategies.py            # NavigationMode resolution, driver helpers
@@ -38,16 +40,16 @@ app/
 scripts/
   bench_scrape.py            # TestClient wall-time bench for POST /scrape (request tier)
 tests/
-  api/                       # HTTP contract + request schema tests
-  domain/                    # (reserved)
-  engine/                    # ScraperEngine unit tests
-  infra/                     # challenge, metadata, xhr unit tests
+  api/                       # HTTP contract, request schema, 504 timeout envelope tests
+  domain/                    # ScrapeService unit tests (timeout error mapping)
+  engine/                    # ScraperEngine units, isolation regressions, timeout progress
+  infra/                     # challenge, metadata, xhr, progress, sentry, telemetry, request-id, cleanup
   security/                  # UrlGuard tests
   support/
-    http.py                  # TestClient + dependency_overrides helper
-    fakes.py                 # shared FakeDriver, FakeRequest, ...
-  test_bench_regression.py   # lightweight guard that bench script completes
-  test_engine_isolation.py   # singleton + per-request isolation regression tests
+    http.py                  # test_client() context manager + dependency_overrides helper
+    fakes.py                 # shared FakeDriver, FakeRequest, fake_request_cls, ...
+    factories.py             # scrape_request(), example_url()
+  test_bench_regression.py   # lightweight guard that bench script completes (root: guards scripts/)
 ```
 
 Layer rules:
@@ -61,8 +63,9 @@ Layer rules:
 
 Conventions:
 
-- Use `create_app()` in tests; override deps via `app.dependency_overrides`, not module globals.
-- Use `TestClient(app)` as a context manager so lifespan runs (singleton engine/executor).
+- Use `tests/support/http.test_client()` for HTTP tests; it runs lifespan and manages `dependency_overrides`. No ad-hoc `TestClient(create_app())` in test modules.
+- Loggers come from `app.logging_config.get_logger()`; do not call `logging.getLogger` with a literal name.
+- Wall-clock/timeout math (elapsed, remaining, step budgets) lives in `app/engine/budget.py`; tiers must not re-derive it.
 - Config: add env vars to `Settings` in `config.py`; call `reset_settings_cache()` in tests that patch env.
 - Wire types live in `app/schemas/` submodules; import directly (`from app.schemas.request import ScrapeRequest`). No long-lived re-export shim.
 - Domain logic stays out of route handlers and Pydantic shells.
@@ -97,7 +100,7 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 
 - Endpoints: `GET /health`, `POST /scrape`.
 - `openapi.yaml` is generated from `app.openapi()` via `make openapi`. Do not hand-edit. `make openapi-verify` is part of `make check`. Spectral (`make spectral`) lints the snapshot; do not add a post-processor that mutates the dump.
-- Wire types live in `app/schemas/`. Engine imports them. Routes serialize via `ScrapeService.serialize()` / `json_response()`.
+- Wire types live in `app/schemas/`. Engine imports them. Routes call `ScrapeService.process()` and serialize via `json_response()`.
 - OpenAPI `info.version` is `2.0.0`. Schema names: `ScrapeSuccess` (200) and `ScrapeError` (400/403/422/502/504). No `ScrapeResponse` alias.
 - Success `/scrape` fields: `url`, `final_url`, `status_code`, `headers`, `html`, `metadata_error`, `xhr_responses`, `diagnostics`.
 - When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8` and `html` is UTF-8-normalized.
