@@ -37,16 +37,16 @@ class MetadataExtractor:
         if not isinstance(reqs, (list, tuple)):
             return None, None, None
         for req in reversed(reqs):
-            resp = req.response
-            status_code = resp.status_code if resp is not None else None
+            resp = getattr(req, "response", None)
+            status_code = getattr(resp, "status_code", None) if resp is not None else None
             if status_code is not None:
-                headers = resp.headers if resp is not None else None
+                headers = getattr(resp, "headers", None)
                 hdr_dict = (
                     {str(k): str(v) for k, v in dict(headers).items()}
                     if headers
                     else None
                 )
-                req_url = req.url
+                req_url = getattr(req, "url", None)
                 return int(status_code), hdr_dict, str(req_url) if req_url else None
         return None, None, None
 

@@ -16,8 +16,8 @@ from app.schemas.enums import (
     ExecutionTier,
     NavigationMode,
 )
-from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeDiagnostics, ScrapeError, ScrapeSuccess
+from tests.support.factories import scrape_request
 from tests.support.fakes import (
     FakeDriver,
 )
@@ -32,8 +32,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
                 captured["navigate_timeout"] = kwargs.get("timeout")
                 return None
 
-        payload = ScrapeRequest(
-            url="https://example.com",
+        payload = scrape_request(
             execution_mode="browser",
             navigation_mode="get",
             max_retries=0,
@@ -85,20 +84,18 @@ class ScraperEngineUnitTests(unittest.TestCase):
             self.assertFalse(session.runtime_dir.exists())
 
     def test_effective_user_agent_resolution(self):
-        req1 = ScrapeRequest(
-            url="https://example.com",
+        req1 = scrape_request(
             user_agent="CustomAgent/1.0",
             headers={"User-Agent": "HeaderAgent/1.0"},
         )
         self.assertEqual(req1.effective_user_agent, "CustomAgent/1.0")
 
-        req2 = ScrapeRequest(
-            url="https://example.com",
+        req2 = scrape_request(
             headers={"User-Agent": "HeaderAgent/1.0"},
         )
         self.assertEqual(req2.effective_user_agent, "HeaderAgent/1.0")
 
-        req3 = ScrapeRequest(url="https://example.com")
+        req3 = scrape_request()
         self.assertIsNone(req3.effective_user_agent)
 
     def test_scrape_envelope_constructors(self):
