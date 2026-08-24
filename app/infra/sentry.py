@@ -1,13 +1,30 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Protocol, TypedDict, cast
 
 from app.config import SentrySettings, Settings
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
 _INITIALIZED = False
+
+
+class SentryEventHint(TypedDict, total=False):
+    log_record: object
+
+
+class SentryEvent(TypedDict, total=False):
+    tags: dict[str, str]
+    logger: str
+    logentry: dict[str, str]
+    message: str
+
+
+class SentryBeforeSend(Protocol):
+    def __call__(
+        self, event: SentryEvent, hint: SentryEventHint
+    ) -> SentryEvent | None: ...
 
 
 def is_sentry_enabled(settings: Settings | None = None) -> bool:
@@ -22,7 +39,7 @@ def sentry_is_ready() -> bool:
     return is_sentry_enabled() and _INITIALIZED
 
 
-def _before_send(event: dict[str, Any], hint: dict[str, Any]) -> dict[str, Any] | None:
+def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | None:
     tags = event.get("tags") or {}
     if tags.get("error_category") == "challenge_block":
         return None
@@ -79,7 +96,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
             FastApiIntegration(),
             StarletteIntegration(),
         ],
-        "before_send": _before_send,
+        "before_send": cast(SentryBeforeSend, _before_send),
     }
 
     if sentry.release.strip():

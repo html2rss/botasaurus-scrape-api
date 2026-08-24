@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from app.constants import SERVICE_NAME
 from app.schemas.enums import ErrorCategory, ExecutionTier
 from app.schemas.response import (
@@ -12,8 +14,10 @@ from app.schemas.response import (
     ScrapeSuccess,
 )
 
+OpenApiExampleDict = dict[str, Any]
 
-def build_scrape_success_example() -> dict:
+
+def build_scrape_success_example() -> OpenApiExampleDict:
     return ScrapeSuccess(
         url="https://example.com",
         final_url="https://example.com/",
@@ -33,7 +37,7 @@ def build_scrape_success_example() -> dict:
     ).model_dump(mode="json")
 
 
-def build_scrape_error_example() -> dict:
+def build_scrape_error_example() -> OpenApiExampleDict:
     return ScrapeError(
         url="https://example.com",
         error="Target URL is blocked",
@@ -49,7 +53,7 @@ def build_scrape_error_example() -> dict:
     ).model_dump(mode="json")
 
 
-def build_health_example() -> dict:
+def build_health_example() -> OpenApiExampleDict:
     return HealthResponse(
         status="ok",
         service=SERVICE_NAME,
