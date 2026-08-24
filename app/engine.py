@@ -27,8 +27,10 @@ from app.schemas import (
     ScrapeError,
     ScrapeRequest,
     ScrapeSuccess,
+    TimeoutPhase,
     XhrResponse,
 )
+from app.scrape_progress import ScrapeProgress
 from app.xhr_collector import XhrCollector
 
 logger = logging.getLogger("botasaurus_scrape_api")
@@ -117,6 +119,7 @@ def _diagnostics(
     render_ms: int = 0,
     execution_tier: ExecutionTier | None = None,
     assessment: ChallengeAssessment | None = None,
+    timeout_phase: TimeoutPhase | None = None,
 ) -> ScrapeDiagnostics:
     challenge = None
     if assessment is not None:
@@ -132,6 +135,7 @@ def _diagnostics(
         render_ms=render_ms,
         execution_tier=execution_tier,
         challenge=challenge,
+        timeout_phase=timeout_phase,
     )
 
 
@@ -182,6 +186,7 @@ def _error(
     render_ms: int = 0,
     execution_tier: ExecutionTier | None = None,
     assessment: ChallengeAssessment | None = None,
+    timeout_phase: TimeoutPhase | None = None,
 ) -> ScrapeError:
     return ScrapeError(
         url=url,
@@ -194,6 +199,7 @@ def _error(
             render_ms=render_ms,
             execution_tier=execution_tier,
             assessment=assessment,
+            timeout_phase=timeout_phase,
         ),
     )
 
@@ -209,6 +215,7 @@ def _terminal_error(
     render_ms: int = 0,
     execution_tier: ExecutionTier | None = None,
     assessment: ChallengeAssessment | None = None,
+    timeout_phase: TimeoutPhase | None = None,
 ) -> ScrapeError:
     return _error(
         url,
@@ -220,6 +227,7 @@ def _terminal_error(
         render_ms=render_ms,
         execution_tier=execution_tier,
         assessment=assessment,
+        timeout_phase=timeout_phase,
     )
 
 
@@ -425,9 +433,16 @@ class ScraperEngine:
         payload: ScrapeRequest,
         request_id: str,
         started_monotonic: float,
+        progress: ScrapeProgress | None = None,
     ) -> ScrapeSuccess | ScrapeError | None:
         target_url = str(payload.url)
         remaining_budget = _remaining_total_seconds(started_monotonic)
+        if progress is not None:
+            progress.mark(
+                TimeoutPhase.WORK,
+                attempts=1,
+                execution_tier=ExecutionTier.HTTP_REQUEST,
+            )
 
         req_headers = dict(payload.headers) if payload.headers else {}
         proxies = (
@@ -514,6 +529,7 @@ class ScraperEngine:
         payload: ScrapeRequest,
         session: ScrapeSession,
         started_monotonic: float,
+        progress: ScrapeProgress | None = None,
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         request_id = session.request_id
@@ -530,6 +546,11 @@ class ScraperEngine:
             else None
         )
 
+        if progress is not None:
+            progress.mark(
+                TimeoutPhase.BOOT,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            )
         session.driver = Driver(
             headless=payload.headless,
             enable_xvfb_virtual_display=not payload.headless,
@@ -546,9 +567,21 @@ class ScraperEngine:
         )
         self._configure_driver(session.driver, payload, target_url, collector=collector)
         browser_ready_monotonic = time.monotonic()
+        if progress is not None:
+            progress.mark(
+                TimeoutPhase.WORK,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+            )
 
         for attempt_index, strategy in enumerate(strategies, start=1):
             attempts = attempt_index
+            if progress is not None:
+                progress.mark(
+                    TimeoutPhase.WORK,
+                    attempts=attempts,
+                    strategy_used=NavigationMode(strategy),
+                    execution_tier=ExecutionTier.BROWSER_DRIVER,
+                )
             try:
                 step_budget = _browser_step_budget_seconds(
                     started_monotonic, browser_ready_monotonic
@@ -646,9 +679,10 @@ class ScraperEngine:
                     continue
 
                 render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                is_timeout = "timeout" in str(exc).lower()
                 category = (
                     ErrorCategory.TIMEOUT
-                    if "timeout" in str(exc).lower()
+                    if is_timeout
                     else ErrorCategory.NAVIGATION_ERROR
                 )
                 return _terminal_error(
@@ -660,6 +694,7 @@ class ScraperEngine:
                     render_ms=render_ms,
                     error_category=category,
                     execution_tier=ExecutionTier.BROWSER_DRIVER,
+                    timeout_phase=TimeoutPhase.WORK if is_timeout else None,
                 )
 
         render_ms = int((time.monotonic() - started_monotonic) * 1000)
@@ -680,17 +715,21 @@ class ScraperEngine:
         deadline_monotonic: float | None = None,
         *,
         request_id: str | None = None,
+        progress: ScrapeProgress | None = None,
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         resolved_request_id = request_id or str(uuid.uuid4())
         started_monotonic = time.monotonic()
 
         if deadline_monotonic and started_monotonic >= deadline_monotonic:
+            if progress is not None:
+                progress.mark(TimeoutPhase.QUEUE)
             return _terminal_error(
                 target_url,
                 "Scrape timed out in threadpool queue before execution started",
                 request_id=resolved_request_id,
                 error_category=ErrorCategory.TIMEOUT,
+                timeout_phase=TimeoutPhase.QUEUE,
             )
 
         with ScrapeSession(self, resolved_request_id) as session:
@@ -707,7 +746,10 @@ class ScraperEngine:
             if should_try_request_tier:
                 try:
                     request_result = self.run_request_tier(
-                        payload, resolved_request_id, started_monotonic
+                        payload,
+                        resolved_request_id,
+                        started_monotonic,
+                        progress=progress,
                     )
                     if request_result is not None:
                         return request_result
@@ -720,14 +762,22 @@ class ScraperEngine:
                     )
                     if payload.execution_mode == ExecutionMode.REQUEST:
                         render_ms = int((time.monotonic() - started_monotonic) * 1000)
+                        is_timeout = "timeout" in str(exc).lower()
                         return _terminal_error(
                             target_url,
                             str(exc),
                             request_id=resolved_request_id,
                             attempts=1,
                             render_ms=render_ms,
-                            error_category=ErrorCategory.NAVIGATION_ERROR,
+                            error_category=(
+                                ErrorCategory.TIMEOUT
+                                if is_timeout
+                                else ErrorCategory.NAVIGATION_ERROR
+                            ),
                             execution_tier=ExecutionTier.HTTP_REQUEST,
+                            timeout_phase=TimeoutPhase.WORK if is_timeout else None,
                         )
 
-            return self.run_browser_tier(payload, session, started_monotonic)
+            return self.run_browser_tier(
+                payload, session, started_monotonic, progress=progress
+            )

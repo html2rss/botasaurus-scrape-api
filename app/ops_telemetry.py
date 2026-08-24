@@ -35,13 +35,15 @@ def _apply_scrape_tags(scope: object, result: ScrapeError, *, http_status: int) 
         scope.set_tag("host", host)  # type: ignore[attr-defined]
     scope.set_tag("http_status", str(http_status))  # type: ignore[attr-defined]
     scope.set_tag("render_ms", str(diagnostics.render_ms))  # type: ignore[attr-defined]
-    scope.set_context(  # type: ignore[attr-defined]
-        "scrape",
-        {
-            "request_id": diagnostics.request_id,
-            "attempts": diagnostics.attempts,
-        },
-    )
+    scrape_context: dict[str, object] = {
+        "request_id": diagnostics.request_id,
+        "attempts": diagnostics.attempts,
+    }
+    if diagnostics.timeout_phase is not None:
+        phase = diagnostics.timeout_phase.value
+        scope.set_tag("timeout_phase", phase)  # type: ignore[attr-defined]
+        scrape_context["timeout_phase"] = phase
+    scope.set_context("scrape", scrape_context)  # type: ignore[attr-defined]
     if diagnostics.strategy_used is not None:
         scope.set_tag("strategy_used", diagnostics.strategy_used.value)  # type: ignore[attr-defined]
     if diagnostics.execution_tier is not None:
@@ -59,12 +61,14 @@ def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
 
     host = _hostname(result.url)
     category = result.error_category.value
+    phase = result.diagnostics.timeout_phase
+    category_label = f"{category}/{phase.value}" if phase is not None else category
 
     with sentry_sdk.new_scope() as scope:
         scope.fingerprint = _issue_fingerprint(category, host)
         _apply_scrape_tags(scope, result, http_status=http_status)
         sentry_sdk.capture_message(
-            f"scrape terminal failure [{category}] host={host or 'unknown'}",
+            f"scrape terminal failure [{category_label}] host={host or 'unknown'}",
             level="error",
         )
 

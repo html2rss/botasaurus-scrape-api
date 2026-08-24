@@ -324,6 +324,15 @@ components:
           examples:
           - blocked: false
             detected: false
+        timeout_phase:
+          anyOf:
+          - $ref: '#/components/schemas/TimeoutPhase'
+          - type: 'null'
+          description: 'When `error_category` is `timeout`, which stage burned the
+            budget: `queue` (threadpool wait), `boot` (browser/driver start), or `work`
+            (navigate/wait/scroll). Null for non-timeout outcomes.'
+          examples:
+          - work
       type: object
       required:
       - request_id
@@ -622,6 +631,13 @@ components:
       - html
       - diagnostics
       title: ScrapeSuccess
+    TimeoutPhase:
+      type: string
+      enum:
+      - queue
+      - boot
+      - work
+      title: TimeoutPhase
     WindowSize:
       properties:
         width:

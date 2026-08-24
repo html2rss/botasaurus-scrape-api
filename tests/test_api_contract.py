@@ -838,7 +838,7 @@ class RequestIdContractTests(unittest.TestCase):
         import app.main as main_mod
         from app.main import app
 
-        def fake_execute(payload, _deadline=None, *, request_id=None):
+        def fake_execute(payload, _deadline=None, *, request_id=None, progress=None):
             return ScrapeSuccess(
                 url=str(payload.url),
                 html="<html></html>",
@@ -959,7 +959,7 @@ class SchemaValidationHttpTests(unittest.TestCase):
 
         captured: dict[str, int] = {}
 
-        def fake_execute(payload, _deadline=None, *, request_id=None):
+        def fake_execute(payload, _deadline=None, *, request_id=None, progress=None):
             captured["wait"] = payload.wait_timeout_seconds
             return ScrapeSuccess(
                 url=str(payload.url),
