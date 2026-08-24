@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Protocol, cast, runtime_checkable
 
-logger = logging.getLogger("botasaurus_scrape_api")
+from app.logging_config import get_logger
+
+logger = get_logger()
 
 
 @runtime_checkable

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import errno
-import logging
 import time
 from typing import cast
 from urllib.parse import urlparse
@@ -25,11 +24,12 @@ from app.infra.detector import ChallengeAssessment, ChallengeDetector
 from app.infra.metadata import MetadataExtractor, MetadataResult
 from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
+from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess, XhrResponse
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 
 def remaining_work_seconds(settings: Settings, browser_ready_monotonic: float) -> int:

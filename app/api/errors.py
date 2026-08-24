@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, TypedDict, cast
 from urllib.parse import urlparse
 
@@ -11,9 +10,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.infra.request_id import resolve_request_id
+from app.logging_config import get_logger
 from app.schemas.response import ScrapeError, ScrapeSuccess, validation_error
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 _NON_FIELD_LOC = {"body", "query", "path", "header"}
 

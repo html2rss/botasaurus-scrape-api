@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import logging
 from typing import Any, Protocol, TypedDict, cast
 
 from app.config import SentrySettings, Settings
+from app.logging_config import get_logger
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 _initialized = False
 

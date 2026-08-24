@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import threading
 import time
 import uuid
@@ -20,6 +19,7 @@ from app.infra.runtime_cleanup import (
     runtime_root_low_on_space,
 )
 from app.infra.scrape_progress import ScrapeProgress
+from app.logging_config import get_logger
 from app.schemas.enums import (
     ErrorCategory,
     ExecutionMode,
@@ -30,7 +30,7 @@ from app.schemas.enums import (
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 
 class ScraperEngine:

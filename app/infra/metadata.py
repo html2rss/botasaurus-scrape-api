@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from typing import cast
 
@@ -13,8 +12,9 @@ from app.infra.cdp_types import (
     CdpPerformanceLogEntry,
     CdpResponseReceivedMessage,
 )
+from app.logging_config import get_logger
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 
 @dataclass(frozen=True, slots=True)

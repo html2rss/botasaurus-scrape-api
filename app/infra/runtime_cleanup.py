@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import logging
 import shutil
 from pathlib import Path
 
-logger = logging.getLogger("botasaurus_scrape_api")
+from app.logging_config import get_logger
+
+logger = get_logger()
 
 
 def runtime_root_low_on_space(

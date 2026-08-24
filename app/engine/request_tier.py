@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import time
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
@@ -11,11 +10,12 @@ from app.config import Settings
 from app.engine.envelope import build_error, build_success
 from app.infra.detector import ChallengeDetector
 from app.infra.scrape_progress import ScrapeProgress
+from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 if TYPE_CHECKING:
     from botasaurus.request import HttpResponse

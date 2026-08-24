@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from app.engine.driver_capabilities import (
@@ -11,11 +10,12 @@ from app.engine.driver_capabilities import (
     call_quietly,
 )
 from app.infra.xhr_collector import XhrCollector
+from app.logging_config import get_logger
 from app.schemas.enums import NavigationMode
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import XhrResponse
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 _CAPABILITY_MISS = object()
 

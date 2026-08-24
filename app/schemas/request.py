@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -14,9 +13,10 @@ from pydantic import (
 )
 
 from app.config import get_settings
+from app.logging_config import get_logger
 from app.schemas.enums import ExecutionMode, NavigationMode
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 
 def _wait_timeout_field_description() -> str:

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import re
 import uuid
 
-logger = logging.getLogger("botasaurus_scrape_api")
+from app.logging_config import get_logger
+
+logger = get_logger()
 
 _MAX_LENGTH = 128
 _SAFE_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")

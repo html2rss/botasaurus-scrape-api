@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import logging
 from urllib.parse import urlparse
 
 from app.constants import SERVICE_NAME
+from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory
 from app.schemas.response import ScrapeError
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 _P0_CATEGORIES = frozenset(
     {

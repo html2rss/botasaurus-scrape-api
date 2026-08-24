@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -15,6 +14,7 @@ from app.engine import ScraperEngine
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.scrape_progress import ScrapeProgress
+from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import (
@@ -25,7 +25,7 @@ from app.schemas.response import (
 )
 from app.security import UrlGuard, ValidationResult
 
-logger = logging.getLogger("botasaurus_scrape_api")
+logger = get_logger()
 
 
 @dataclass(frozen=True, slots=True)
