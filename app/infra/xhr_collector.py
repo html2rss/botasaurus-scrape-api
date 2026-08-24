@@ -107,12 +107,7 @@ class XhrCollector:
             )
 
         for rid, meta in jobs:
-            request_id = meta.pop("request_id", rid)
-            if isinstance(request_id, int):
-                normalized_request_id = request_id
-            else:
-                normalized_request_id = request_id or rid
-            body = self._fetch_body(tab, normalized_request_id, rid)
+            body = self._fetch_body(tab, meta["request_id"], rid)
             if body is None:
                 continue
             body_bytes = len(body.encode("utf-8"))

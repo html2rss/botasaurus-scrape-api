@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 _CHALLENGE_MARKERS: tuple[str, ...] = (
     "challenge-error-text",
@@ -41,7 +40,7 @@ class ChallengeDetector:
         cls,
         html: str,
         status_code: int | None = None,
-        driver: Any = None,
+        driver: object | None = None,
     ) -> ChallengeAssessment:
         lower_html = html.lower()
         matched_marker: str | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from app.constants import SERVICE_NAME
@@ -8,6 +9,17 @@ from app.schemas.enums import ErrorCategory
 from app.schemas.response import ScrapeError
 
 logger = get_logger()
+
+
+class SentryScope(Protocol):
+    """Structural seam for the sentry_sdk scope used by terminal telemetry."""
+
+    fingerprint: list[str] | None
+
+    def set_tag(self, key: str, value: str) -> None: ...
+
+    def set_context(self, key: str, value: dict[str, object]) -> None: ...
+
 
 _P0_CATEGORIES = frozenset(
     {
@@ -25,29 +37,31 @@ def _issue_fingerprint(error_category: str, host: str | None) -> list[str]:
     return [SERVICE_NAME, error_category, host or "unknown"]
 
 
-def _apply_scrape_tags(scope: object, result: ScrapeError, *, http_status: int) -> None:
+def _apply_scrape_tags(
+    scope: SentryScope, result: ScrapeError, *, http_status: int
+) -> None:
     host = _hostname(result.url)
     category = result.error_category.value
     diagnostics = result.diagnostics
 
-    scope.set_tag("service", SERVICE_NAME)  # type: ignore[attr-defined]
-    scope.set_tag("error_category", category)  # type: ignore[attr-defined]
+    scope.set_tag("service", SERVICE_NAME)
+    scope.set_tag("error_category", category)
     if host:
-        scope.set_tag("host", host)  # type: ignore[attr-defined]
-    scope.set_tag("http_status", str(http_status))  # type: ignore[attr-defined]
-    scope.set_tag("render_ms", str(diagnostics.render_ms))  # type: ignore[attr-defined]
+        scope.set_tag("host", host)
+    scope.set_tag("http_status", str(http_status))
+    scope.set_tag("render_ms", str(diagnostics.render_ms))
     scrape_context: dict[str, object] = {
         "request_id": diagnostics.request_id,
         "attempts": diagnostics.attempts,
     }
     if phase := diagnostics.timeout_phase:
-        scope.set_tag("timeout_phase", phase.value)  # type: ignore[attr-defined]
+        scope.set_tag("timeout_phase", phase.value)
         scrape_context["timeout_phase"] = phase.value
-    scope.set_context("scrape", scrape_context)  # type: ignore[attr-defined]
+    scope.set_context("scrape", scrape_context)
     if diagnostics.strategy_used is not None:
-        scope.set_tag("strategy_used", diagnostics.strategy_used.value)  # type: ignore[attr-defined]
+        scope.set_tag("strategy_used", diagnostics.strategy_used.value)
     if diagnostics.execution_tier is not None:
-        scope.set_tag("execution_tier", diagnostics.execution_tier.value)  # type: ignore[attr-defined]
+        scope.set_tag("execution_tier", diagnostics.execution_tier.value)
 
 
 def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
@@ -66,7 +80,8 @@ def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
     phase = result.diagnostics.timeout_phase
     category_label = f"{category}/{phase.value}" if phase else category
 
-    with sentry_sdk.new_scope() as scope:
+    with sentry_sdk.new_scope() as raw_scope:
+        scope = cast(SentryScope, raw_scope)
         scope.fingerprint = _issue_fingerprint(category, host)
         _apply_scrape_tags(scope, result, http_status=http_status)
         sentry_sdk.capture_message(

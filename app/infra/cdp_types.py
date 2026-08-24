@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 
 class CdpNetworkResponse(TypedDict, total=False):
@@ -34,4 +34,4 @@ class PendingXhrMeta(TypedDict):
     url: str
     status_code: int
     headers: dict[str, str]
-    request_id: NotRequired[str | int]
+    request_id: str | int

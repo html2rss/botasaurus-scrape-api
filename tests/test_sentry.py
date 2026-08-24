@@ -12,7 +12,6 @@ from app.config import reset_settings_cache
 from app.infra.sentry import (
     _before_send,
     flush_sentry,
-    is_sentry_enabled,
     sentry_is_ready,
     setup_sentry,
 )
@@ -30,28 +29,15 @@ class SentryIntegrationTests(unittest.TestCase):
         sentry_mod._initialized = False
         reset_settings_cache()
 
-    def test_is_sentry_enabled(self):
-        with env():
-            self.assertFalse(is_sentry_enabled())
+    def test_sentry_is_ready_requires_successful_init(self):
+        self.assertFalse(sentry_is_ready())
 
-        with env(SENTRY_DSN=""):
-            self.assertFalse(is_sentry_enabled())
-
-        with env(SENTRY_DSN="   "):
-            self.assertFalse(is_sentry_enabled())
-
-        with env(SENTRY_DSN="https://key@sentry.io/123"):
-            self.assertTrue(is_sentry_enabled())
-
-    def test_sentry_is_ready_requires_init(self):
-        with env():
+        with (
+            env(SENTRY_DSN="https://key@sentry.io/123"),
+            patch("sentry_sdk.init"),
+        ):
             self.assertFalse(sentry_is_ready())
-
-        with env(SENTRY_DSN="https://key@sentry.io/123"):
-            self.assertFalse(sentry_is_ready())
-
-        sentry_mod._initialized = True
-        with env(SENTRY_DSN="https://key@sentry.io/123"):
+            self.assertTrue(setup_sentry())
             self.assertTrue(sentry_is_ready())
 
     def test_setup_sentry_noop_when_dsn_absent(self):

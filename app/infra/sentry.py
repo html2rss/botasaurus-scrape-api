@@ -27,16 +27,9 @@ class SentryBeforeSend(Protocol):
     ) -> SentryEvent | None: ...
 
 
-def is_sentry_enabled(settings: Settings | None = None) -> bool:
-    from app.config import get_settings
-
-    resolved = settings or get_settings()
-    return bool(resolved.sentry.dsn.strip())
-
-
 def sentry_is_ready() -> bool:
-    """Return True when Sentry DSN is set and init succeeded."""
-    return is_sentry_enabled() and _initialized
+    """Return True when Sentry init succeeded (init requires a DSN)."""
+    return _initialized
 
 
 def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | None:
@@ -84,13 +77,10 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         )
         return False
 
-    traces_sample_rate = max(0.0, min(1.0, sentry.traces_sample_rate))
-    profiles_sample_rate = max(0.0, min(1.0, sentry.profiles_sample_rate))
-
     init_kwargs: dict[str, Any] = {
         "dsn": dsn,
         "environment": sentry.effective_environment(deployment_environment),
-        "traces_sample_rate": traces_sample_rate,
+        "traces_sample_rate": sentry.traces_sample_rate,
         "send_default_pii": sentry.send_default_pii,
         "integrations": [
             FastApiIntegration(),
@@ -101,8 +91,8 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
 
     if sentry.release.strip():
         init_kwargs["release"] = sentry.release.strip()
-    if profiles_sample_rate > 0.0:
-        init_kwargs["profiles_sample_rate"] = profiles_sample_rate
+    if sentry.profiles_sample_rate > 0.0:
+        init_kwargs["profiles_sample_rate"] = sentry.profiles_sample_rate
 
     sentry_sdk.init(**init_kwargs)
     _initialized = True
@@ -111,7 +101,7 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
         sentry.effective_environment(deployment_environment),
         sentry.release or None,
-        traces_sample_rate,
+        sentry.traces_sample_rate,
     )
     return True
 

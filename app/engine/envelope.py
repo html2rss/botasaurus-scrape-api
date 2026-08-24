@@ -20,6 +20,7 @@ def utf8_normalize_html(html: str) -> str:
         return html
     try:
         html = html.encode("latin-1").decode("utf-8")
+    # fmt: skip keeps parenthesized except (dev venv predates PEP 758 syntax)
     except (UnicodeEncodeError, UnicodeDecodeError):  # fmt: skip
         pass
     return html.encode("utf-8", errors="replace").decode("utf-8")

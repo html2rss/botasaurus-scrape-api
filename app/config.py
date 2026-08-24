@@ -32,27 +32,20 @@ class SentrySettings(BaseSettings):
     )
     @classmethod
     def parse_sample_rate(cls, value: object) -> float:
-        if value is None:
-            return 0.0
+        # Env values are best-effort: invalid floats disable sampling
+        # instead of failing service startup.
         try:
-            parsed = float(str(value).strip())
-            return max(0.0, min(1.0, parsed))
-        except (ValueError, AttributeError):  # fmt: skip
+            parsed = float(str(value).strip()) if value is not None else 0.0
+        except ValueError:
             return 0.0
+        return max(0.0, min(1.0, parsed))
 
     @field_validator("send_default_pii", mode="before")
     @classmethod
     def parse_bool(cls, value: object) -> bool:
         if isinstance(value, bool):
             return value
-        if value is None:
-            return False
-        normalized = str(value).strip().lower()
-        if normalized in ("true", "1", "yes", "on"):
-            return True
-        if normalized in ("false", "0", "no", "off"):
-            return False
-        return False
+        return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
 
     def effective_environment(self, deployment_environment: str) -> str:
         return (self.environment or deployment_environment or "production").strip()
