@@ -107,6 +107,45 @@ class RequestIdContractTests(unittest.TestCase):
         self.assertEqual(body["error_category"], "navigation_error")
 
 
+class SsrfGuardHttpTests(unittest.TestCase):
+    """Pin the SSRF guardrail at the HTTP seam (ScrapeService.process)."""
+
+    REQUEST_ID = "550e8400-e29b-41d4-a716-446655440042"
+
+    def _post(self, client, payload):
+        return client.post(
+            "/scrape", json=payload, headers={"X-Request-Id": self.REQUEST_ID}
+        )
+
+    def test_localhost_target_returns_403_error_envelope(self):
+        with test_client() as client:
+            for target in ("http://localhost/", "http://127.0.0.1:8080/admin"):
+                with self.subTest(target=target):
+                    response = self._post(client, {"url": target})
+                    self.assertEqual(response.status_code, 403)
+                    body = response.json()
+                    self.assertEqual(body["error_category"], "validation")
+                    self.assertEqual(body["diagnostics"]["request_id"], self.REQUEST_ID)
+                    self.assertNotIn("html", body)
+
+    def test_private_ip_target_returns_403(self):
+        with test_client() as client:
+            response = self._post(client, {"url": "http://192.168.1.10/"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error_category"], "validation")
+
+    def test_blocked_proxy_returns_403_before_execution(self):
+        with test_client() as client:
+            response = self._post(
+                client,
+                {"url": "https://example.com", "proxy": "http://127.0.0.1:9/"},
+            )
+        self.assertEqual(response.status_code, 403)
+        body = response.json()
+        self.assertEqual(body["error_category"], "validation")
+        self.assertEqual(body["diagnostics"]["request_id"], self.REQUEST_ID)
+
+
 class SchemaValidationHttpTests(unittest.TestCase):
     def test_schema_422_returns_scrape_envelope(self):
         from fastapi.testclient import TestClient
