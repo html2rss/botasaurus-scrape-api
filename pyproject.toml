@@ -16,6 +16,7 @@ dependencies = [
 dev = [
     "ruff==0.16.4",
     "PyYAML==6.0.3",
+    "pyright==1.1.406",
 ]
 
 [tool.ruff]
@@ -27,3 +28,21 @@ ignore = [
     "E501",
     "SIM105",
 ]
+
+[tool.pyright]
+pythonVersion = "3.14"
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+include = ["app", "tests"]
+exclude = [".venv"]
+reportMissingTypeStubs = false
+reportMissingImports = false
+
+[[tool.pyright.executionEnvironments]]
+root = "tests"
+reportArgumentType = "none"
+reportAttributeAccessIssue = "none"
+reportOptionalSubscript = "none"
+reportOptionalMemberAccess = "none"
+reportFunctionMemberAccess = "none"

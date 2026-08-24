@@ -5,7 +5,7 @@ from __future__ import annotations
 import errno
 import logging
 import time
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -113,21 +113,25 @@ def run_browser_tier(
         else None
     )
 
-    session.driver = Driver(
-        headless=payload.headless,
-        enable_xvfb_virtual_display=not payload.headless,
-        proxy=payload.proxy,
-        profile=str(session.profile_dir),
-        tiny_profile=True,
-        block_images=payload.block_images,
-        block_images_and_css=payload.block_images_and_css,
-        wait_for_complete_page_load=payload.wait_for_complete_page_load,
-        user_agent=payload.effective_user_agent,
-        window_size=driver_window_size,
-        lang=payload.lang,
-        remove_default_browser_check_argument=True,
+    driver = cast(
+        DriverProtocol,
+        Driver(
+            headless=payload.headless,
+            enable_xvfb_virtual_display=not payload.headless,
+            proxy=payload.proxy,
+            profile=str(session.profile_dir),
+            tiny_profile=True,
+            block_images=payload.block_images,
+            block_images_and_css=payload.block_images_and_css,
+            wait_for_complete_page_load=payload.wait_for_complete_page_load,
+            user_agent=payload.effective_user_agent,
+            window_size=driver_window_size,
+            lang=payload.lang,
+            remove_default_browser_check_argument=True,
+        ),
     )
-    configure_driver(session.driver, payload, target_url, collector=collector)
+    session.driver = driver
+    configure_driver(driver, payload, target_url, collector=collector)
     browser_ready_monotonic = time.monotonic()
     progress.mark(
         TimeoutPhase.WORK,
@@ -146,33 +150,33 @@ def run_browser_tier(
             step_budget = browser_step_budget_seconds(
                 settings, started_monotonic, browser_ready_monotonic
             )
-            navigate(session.driver, target_url, strategy, step_budget)
+            navigate(driver, target_url, strategy, step_budget)
             wait_for_readiness(
-                session.driver,
+                driver,
                 selector=payload.wait_for_selector,
                 timeout_seconds=min(payload.wait_timeout_seconds, step_budget),
             )
 
             if payload.scroll:
-                apply_scrolling(session.driver)
+                apply_scrolling(driver)
 
             html, meta, assessment, xhr_responses = collect_page_state(
-                session.driver,
+                driver,
                 target_url,
                 collector,
                 include_xhr=False,
             )
 
             if assessment.challenge_detected or assessment.blocked_detected:
-                call_if_available(session.driver, "bypass_cloudflare")
+                call_if_available(driver, "bypass_cloudflare")
                 html, meta, assessment, xhr_responses = collect_page_state(
-                    session.driver,
+                    driver,
                     target_url,
                     collector,
                     include_xhr=True,
                 )
             else:
-                xhr_responses = harvest_xhr(collector, session.driver)
+                xhr_responses = harvest_xhr(collector, driver)
 
             if assessment.challenge_detected or assessment.blocked_detected:
                 logger.warning(

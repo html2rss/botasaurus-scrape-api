@@ -77,7 +77,7 @@ class UrlGuard:
         for info in addr_infos:
             sockaddr = info[4]
             if sockaddr:
-                resolved_ips.add(sockaddr[0])
+                resolved_ips.add(str(sockaddr[0]))
 
         for ip_text in resolved_ips:
             try:

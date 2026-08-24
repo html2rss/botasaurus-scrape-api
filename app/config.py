@@ -74,11 +74,10 @@ class Settings(BaseSettings):
     )
     runtime_root: Path = Field(default=Path("/tmp/scrape"))
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
-    sentry: SentrySettings | None = None
+    sentry: SentrySettings = Field(default_factory=SentrySettings)
 
     @model_validator(mode="after")
     def validate_timeout_relationship(self) -> Settings:
-        object.__setattr__(self, "sentry", SentrySettings())
         if self.scrape_work_timeout_seconds > self.scrape_timeout_seconds:
             raise ValueError(
                 "SCRAPE_WORK_TIMEOUT_SECONDS cannot exceed SCRAPE_TIMEOUT_SECONDS: "

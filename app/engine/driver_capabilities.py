@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -62,7 +62,7 @@ def call_if_available[T](
     if not callable(method):
         return default
     try:
-        return method(*args, **kwargs)
+        return cast(T, method(*args, **kwargs))
     except Exception as exc:
         logger.debug("driver_capability_failed method=%s error=%s", name, exc)
         return default

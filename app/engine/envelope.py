@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from app.infra.detector import ChallengeAssessment
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
@@ -96,7 +96,7 @@ def build_success(
         headers=headers,
         html=html,
         metadata_error=metadata_error,
-        xhr_responses=xhr_responses or [],
+        xhr_responses=cast(list[XhrResponse], xhr_responses or []),
         diagnostics=build_diagnostics(
             request_id=request_id,
             attempts=attempts,

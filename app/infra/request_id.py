@@ -22,7 +22,7 @@ def resolve_request_id(
     @return tuple of resolved id and used_fallback flag
     """
     candidate = inbound.strip() if inbound is not None else None
-    if _is_valid(candidate):
+    if candidate is not None and _is_valid(candidate):
         return candidate, False
 
     reason = "absent" if not candidate else "invalid"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 
 from app.api.openapi_examples import (
     HEALTH_EXAMPLE,
@@ -17,9 +18,9 @@ from app.schemas.response import ScrapeError
 class OpenApiMetadata:
     api_description: str
     json_error_example: dict[str, dict[str, dict]]
-    scrape_error_responses: dict[int, dict]
-    health_responses: dict[int, dict]
-    scrape_success_response: dict[int, dict]
+    scrape_error_responses: dict[int | str, dict[str, Any]]
+    health_responses: dict[int | str, dict[str, Any]]
+    scrape_success_response: dict[int | str, dict[str, Any]]
     openapi_tags: list[dict[str, str]]
     servers: list[dict[str, str]]
     contact: dict[str, str]
@@ -115,7 +116,9 @@ scrape error envelope, not FastAPI `detail`.
     return OpenApiMetadata(
         api_description=api_description,
         json_error_example=json_error_example,
-        scrape_error_responses=scrape_error_responses,
+        scrape_error_responses=cast(
+            dict[int | str, dict[str, Any]], scrape_error_responses
+        ),
         health_responses={
             200: {
                 "description": "Service is up.",
@@ -158,9 +161,9 @@ scrape error envelope, not FastAPI `detail`.
 # Populated by configure_openapi() during create_app(); route modules import these names.
 API_DESCRIPTION = ""
 JSON_ERROR_EXAMPLE: dict[str, dict[str, dict]] = {}
-SCRAPE_ERROR_RESPONSES: dict[int, dict] = {}
-HEALTH_RESPONSES: dict[int, dict] = {}
-SCRAPE_SUCCESS_RESPONSE: dict[int, dict] = {}
+SCRAPE_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {}
+HEALTH_RESPONSES: dict[int | str, dict[str, Any]] = {}
+SCRAPE_SUCCESS_RESPONSE: dict[int | str, dict[str, Any]] = {}
 OPENAPI_TAGS: list[dict[str, str]] = []
 SERVERS: list[dict[str, str]] = []
 CONTACT: dict[str, str] = {}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 
 class FakeMetadataResponse:
@@ -51,7 +51,7 @@ class FakeDriver:
 
 
 class CaptureDriver(FakeDriver):
-    last_init_kwargs = None
+    last_init_kwargs: ClassVar[dict[str, Any] | None] = None
 
     def __init__(self, *args, **kwargs):
         type(self).last_init_kwargs = dict(kwargs)
@@ -67,7 +67,7 @@ class FakeHttpResponse:
 
 
 class FakeRequest:
-    response = None
+    response: FakeHttpResponse | None = None
 
     def get(self, *_args, **_kwargs):
         return type(self).response
