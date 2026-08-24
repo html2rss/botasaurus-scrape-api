@@ -5,7 +5,7 @@ from __future__ import annotations
 import errno
 import logging
 import time
-from typing import Any, cast
+from typing import cast
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -27,7 +27,7 @@ from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
-from app.schemas.response import ScrapeError, ScrapeSuccess
+from app.schemas.response import ScrapeError, ScrapeSuccess, XhrResponse
 
 logger = logging.getLogger("botasaurus_scrape_api")
 
@@ -61,7 +61,7 @@ def collect_page_state(
     collector: XhrCollector,
     *,
     include_xhr: bool = True,
-) -> tuple[str, MetadataResult, ChallengeAssessment, list[dict[str, Any]]]:
+) -> tuple[str, MetadataResult, ChallengeAssessment, list[XhrResponse]]:
     xhr_responses = harvest_xhr(collector, driver) if include_xhr else []
     html = driver.page_html or ""
     meta = MetadataExtractor.fetch(driver, target_url)

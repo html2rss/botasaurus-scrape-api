@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
-
 from app.infra.detector import ChallengeAssessment
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.response import (
@@ -86,7 +84,7 @@ def build_success(
     headers: dict[str, str] | None = None,
     metadata_error: str | None = None,
     assessment: ChallengeAssessment | None = None,
-    xhr_responses: list[dict[str, Any]] | list[XhrResponse] | None = None,
+    xhr_responses: list[XhrResponse] | None = None,
 ) -> ScrapeSuccess:
     html, headers = html_document_headers(html, headers)
     return ScrapeSuccess(
@@ -96,7 +94,7 @@ def build_success(
         headers=headers,
         html=html,
         metadata_error=metadata_error,
-        xhr_responses=cast(list[XhrResponse], xhr_responses or []),
+        xhr_responses=xhr_responses or [],
         diagnostics=build_diagnostics(
             request_id=request_id,
             attempts=attempts,
