@@ -34,6 +34,7 @@ class XhrCollector:
         self._pending: dict[str, PendingXhrMeta] = {}
         self._ready_ids: list[str] = []
         self._collected: list[XhrResponse] = []
+        self._aggregate_bytes: int = 0
         self._lock = threading.Lock()
 
     def install(self, tab: CdpTabProtocol) -> None:
@@ -51,6 +52,7 @@ class XhrCollector:
             self._pending.clear()
             self._ready_ids.clear()
             self._collected.clear()
+            self._aggregate_bytes = 0
 
     @classmethod
     def _allowlisted_headers(cls, headers: object) -> dict[str, str]:
@@ -102,9 +104,6 @@ class XhrCollector:
             jobs = [
                 (rid, self._pending.pop(rid)) for rid in ready if rid in self._pending
             ]
-            aggregate_bytes = sum(
-                len(entry.body.encode("utf-8")) for entry in self._collected
-            )
 
         for rid, meta in jobs:
             body = self._fetch_body(tab, meta["request_id"], rid)
@@ -120,10 +119,10 @@ class XhrCollector:
             with self._lock:
                 if len(self._collected) >= self.MAX_RESPONSES:
                     break
-                if aggregate_bytes + body_bytes > self.MAX_AGGREGATE_BYTES:
+                if self._aggregate_bytes + body_bytes > self.MAX_AGGREGATE_BYTES:
                     break
                 self._collected.append(entry)
-                aggregate_bytes += body_bytes
+                self._aggregate_bytes += body_bytes
 
         return self.results()
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.schemas.response import ChallengeSignal
+
 _CHALLENGE_MARKERS: tuple[str, ...] = (
     "challenge-error-text",
     "Enable JavaScript and cookies to continue",
@@ -20,6 +22,10 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "geo.captcha-delivery.com",
 )
 
+_CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
+    (m, m.lower()) for m in _CHALLENGE_MARKERS
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ChallengeAssessment:
@@ -30,6 +36,14 @@ class ChallengeAssessment:
     @property
     def is_clean(self) -> bool:
         return not self.blocked_detected and not self.challenge_detected
+
+    def to_signal(self) -> ChallengeSignal:
+        """Convert domain assessment to wire ChallengeSignal DTO."""
+        return ChallengeSignal(
+            blocked=self.blocked_detected,
+            detected=self.challenge_detected,
+            marker=self.detected_marker,
+        )
 
 
 class ChallengeDetector:
@@ -42,7 +56,6 @@ class ChallengeDetector:
         status_code: int | None = None,
         driver: object | None = None,
     ) -> ChallengeAssessment:
-        lower_html = html.lower()
         matched_marker: str | None = None
 
         # 1. Driver-level anti-bot signal inspection
@@ -62,10 +75,11 @@ class ChallengeDetector:
                         # Best-effort driver bot detection check
                         pass
 
-        # 2. HTML text markers
-        if matched_marker is None:
-            for marker in _CHALLENGE_MARKERS:
-                if marker.lower() in lower_html:
+        # 2. HTML text markers (only inspect if driver check did not match)
+        if matched_marker is None and html:
+            lower_html = html.lower()
+            for marker, marker_lower in _CHALLENGE_MARKERS_PAIRS:
+                if marker_lower in lower_html:
                     matched_marker = marker
                     break
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast, runtime_checkable
+from typing import Any, Protocol, overload, runtime_checkable
 
 from app.logging_config import get_logger
 
@@ -86,19 +86,41 @@ def resolve_callable(
     return None
 
 
+@overload
 def call_if_available[T](
     driver: DriverProtocol,
     name: str,
     /,
     *args: Any,
-    default: T = None,  # type: ignore[assignment]
+    default: T,
     **kwargs: Any,
-) -> T:
+) -> T: ...
+
+
+@overload
+def call_if_available(
+    driver: DriverProtocol,
+    name: str,
+    /,
+    *args: Any,
+    default: None = None,
+    **kwargs: Any,
+) -> Any: ...
+
+
+def call_if_available(
+    driver: DriverProtocol,
+    name: str,
+    /,
+    *args: Any,
+    default: Any = None,
+    **kwargs: Any,
+) -> Any:
     method = resolve_callable(driver, name)
     if method is None:
         return default
     try:
-        return cast(T, method(*args, **kwargs))
+        return method(*args, **kwargs)
     except Exception as exc:
         logger.debug("driver_capability_failed method=%s error=%s", name, exc)
         return default

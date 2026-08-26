@@ -7,11 +7,8 @@ from unittest.mock import MagicMock, patch
 from pydantic import ValidationError
 
 from app.config import get_settings
-from app.engine import (
-    ScraperEngine,
-    html_document_headers,
-    utf8_normalize_html,
-)
+from app.engine import ScraperEngine
+from app.engine.envelope import html_document_headers, utf8_normalize_html
 from app.engine.strategies import (
     apply_scrolling,
     resolve_strategies,
