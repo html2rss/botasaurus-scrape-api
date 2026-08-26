@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from app.infra.request_id import resolve_request_id
 from app.logging_config import get_logger
@@ -58,19 +58,21 @@ def validation_error_message(errors: list[ValidationErrorItem]) -> str:
     return "; ".join(parts)
 
 
-def json_response(
-    body: ScrapeSuccess | ScrapeError, *, status_code: int
-) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"))
+def json_response(body: ScrapeSuccess | ScrapeError, *, status_code: int) -> Response:
+    return Response(
+        content=body.model_dump_json(),
+        status_code=status_code,
+        media_type="application/json",
+    )
 
 
 async def request_schema_validation_handler(
     request: Request, exc: RequestValidationError
-) -> JSONResponse:
+) -> Response:
     errors: list[ValidationErrorItem] = list(exc.errors())  # type: ignore[arg-type]
     url = url_from_validation_body(exc.body)
     field = first_schema_field(errors)
-    request_id, _ = resolve_request_id(
+    request_id = resolve_request_id(
         request.headers.get("X-Request-Id"),
         host=urlparse(url).hostname if url else None,
     )
@@ -89,10 +91,10 @@ async def request_schema_validation_handler(
     )
 
 
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
     del exc
     logger.exception("unhandled_exception path=%s", request.url.path)
-    request_id, _ = resolve_request_id(request.headers.get("X-Request-Id"))
+    request_id = resolve_request_id(request.headers.get("X-Request-Id"))
     return json_response(
         validation_error(
             "",

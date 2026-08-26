@@ -26,7 +26,7 @@ _WAIT_TIMEOUT_DESCRIPTION = (
 
 
 def _default_wait_timeout_seconds() -> int:
-    return min(15, get_settings().scrape_work_timeout_seconds)
+    return get_settings().default_wait_timeout_seconds
 
 
 class WindowSize(BaseModel):

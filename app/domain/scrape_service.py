@@ -7,7 +7,6 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import partial
-from urllib.parse import urlparse
 
 from app.config import Settings
 from app.engine import ScraperEngine
@@ -58,9 +57,8 @@ class ScrapeService:
     ) -> ScrapeOutcome:
         """Resolve the request id, enforce SSRF guardrails, then execute."""
         target_url = str(payload.url)
-        request_id, _ = resolve_request_id(
-            inbound_request_id, host=urlparse(target_url).hostname
-        )
+        host = payload.url.host
+        request_id = resolve_request_id(inbound_request_id, host=host)
         blocked = self._guard_outcome(payload, target_url, request_id=request_id)
         if blocked is not None:
             return blocked
@@ -144,6 +142,7 @@ class ScrapeService:
         request_id: str,
     ) -> ScrapeOutcome:
         target_url = str(payload.url)
+        host = payload.url.host
         started_monotonic = time.monotonic()
         deadline_monotonic = started_monotonic + self.settings.scrape_timeout_seconds
         progress = ScrapeProgress()
@@ -187,8 +186,8 @@ class ScrapeService:
             phase = timeout_result.diagnostics.timeout_phase or TimeoutPhase.QUEUE
             logger.warning(
                 "scrape_timeout host=%s mode=%s timeout_seconds=%d phase=%s attempts=%d",
-                urlparse(target_url).hostname,
-                payload.navigation_mode,
+                host,
+                payload.navigation_mode.value,
                 self.settings.scrape_timeout_seconds,
                 phase.value,
                 timeout_result.diagnostics.attempts,
@@ -202,11 +201,13 @@ class ScrapeService:
         logger.info(
             "scrape_complete request_id=%s host=%s mode=%s tier=%s attempts=%s status=%d error_category=%s",
             result.diagnostics.request_id,
-            urlparse(target_url).hostname,
-            payload.navigation_mode,
-            result.diagnostics.execution_tier,
+            host,
+            payload.navigation_mode.value,
+            result.diagnostics.execution_tier.value
+            if result.diagnostics.execution_tier
+            else None,
             result.diagnostics.attempts,
             status_code,
-            result.error_category if isinstance(result, ScrapeError) else None,
+            result.error_category.value if isinstance(result, ScrapeError) else None,
         )
         return ScrapeOutcome(body=result, status_code=status_code)
