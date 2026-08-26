@@ -152,7 +152,7 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 - Vendor seams: local stubs in `typings/` (`stubPath` in `pyproject.toml`); CDP shapes in `app/infra/cdp_types.py`.
 - Engine driver seams use `DriverProtocol` / `CdpTabProtocol` in `driver_capabilities.py`; cast vendor `Driver` at construction when needed.
 - Tests construct `ScrapeRequest` via `tests/support/factories.py` (`scrape_request`, `example_url`); fakes implement protocol shapes in `tests/support/fakes.py`.
-- Residual policy and file-level test directives: `docs/typing-residuals.md`.
+- Strict pyright on `app/` and `tests/`; scoped `# pyright:` file directives only when a test module cannot pass strict without them (prefer fixing types or fakes first).
 
 ## Safety
 
