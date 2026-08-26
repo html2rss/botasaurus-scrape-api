@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 import unittest
 
 from tests.support.fakes import (
@@ -16,6 +15,27 @@ class XhrCollectorTests(unittest.TestCase):
         self.target = "https://example.com/"
         self.collector = XhrCollector(self.target)
 
+    def _ensure_installed(self, tab: FakeTab) -> None:
+        if tab.response_handler is None:
+            self.collector.install(tab)
+
+    def _drive_response(
+        self,
+        tab: FakeTab,
+        request_id: str,
+        response: FakeNetworkResponse,
+        body: str,
+    ) -> None:
+        self._ensure_installed(tab)
+        rid = FakeRequestId(request_id)
+        tab.bodies[str(rid)] = (body, False)
+        response_handler = tab.response_handler
+        finished_handler = tab.finished_handler
+        assert response_handler is not None
+        assert finished_handler is not None
+        response_handler(rid, response, None)
+        finished_handler(type("E", (), {"request_id": rid})())
+
     def _drive_json(
         self,
         tab: FakeTab,
@@ -24,14 +44,12 @@ class XhrCollectorTests(unittest.TestCase):
         body: str,
         mime: str = "application/json",
     ) -> None:
-        rid = FakeRequestId(request_id)
-        tab.bodies[str(rid)] = (body, False)
-        self.collector._on_response(
-            rid,
+        self._drive_response(
+            tab,
+            request_id,
             FakeNetworkResponse(url, 200, mime, {"content-type": mime}),
-            None,
+            body,
         )
-        self.collector._on_finished(type("E", (), {"request_id": rid})())
 
     def test_install_enables_network_and_registers_handlers(self) -> None:
         tab = FakeTab()
@@ -40,23 +58,12 @@ class XhrCollectorTests(unittest.TestCase):
         self.assertIsNotNone(tab.response_handler)
         self.assertIsNotNone(tab.finished_handler)
 
-        rid = FakeRequestId("handler-probe")
-        tab.bodies[str(rid)] = ('{"installed":true}', False)
-        response_handler = tab.response_handler
-        finished_handler = tab.finished_handler
-        assert response_handler is not None
-        assert finished_handler is not None
-        response_handler(
-            rid,
-            FakeNetworkResponse(
-                "https://api.example.com/handler-probe",
-                200,
-                "application/json",
-                {"content-type": "application/json"},
-            ),
-            None,
+        self._drive_json(
+            tab,
+            "handler-probe",
+            "https://api.example.com/handler-probe",
+            '{"installed":true}',
         )
-        finished_handler(type("E", (), {"request_id": rid})())
         results = self.collector.harvest(tab)
         self.assertEqual(len(results), 1)
         self.assertIn("installed", results[0].body)
@@ -89,14 +96,12 @@ class XhrCollectorTests(unittest.TestCase):
     def test_skips_main_document(self) -> None:
         tab = FakeTab()
         self.collector.install(tab)
-        rid = FakeRequestId("doc")
-        tab.bodies[str(rid)] = ('{"nope":true}', False)
-        self.collector._on_response(
-            rid,
+        self._drive_response(
+            tab,
+            "doc",
             FakeNetworkResponse(self.target, 200, "application/json"),
-            None,
+            '{"nope":true}',
         )
-        self.collector._on_finished(type("E", (), {"request_id": rid})())
         self.assertEqual(self.collector.harvest(tab), [])
 
     def test_skips_empty_body(self) -> None:
@@ -138,10 +143,9 @@ class XhrCollectorTests(unittest.TestCase):
     def test_headers_allowlist_keeps_only_content_type(self) -> None:
         tab = FakeTab()
         self.collector.install(tab)
-        rid = FakeRequestId("hdr")
-        tab.bodies[str(rid)] = ('{"ok":true}', False)
-        self.collector._on_response(
-            rid,
+        self._drive_response(
+            tab,
+            "hdr",
             FakeNetworkResponse(
                 "https://api.example.com/secure",
                 200,
@@ -152,9 +156,8 @@ class XhrCollectorTests(unittest.TestCase):
                     "X-Request-Id": "abc",
                 },
             ),
-            None,
+            '{"ok":true}',
         )
-        self.collector._on_finished(type("E", (), {"request_id": rid})())
         results = self.collector.harvest(tab)
         self.assertEqual(len(results), 1)
         self.assertEqual(

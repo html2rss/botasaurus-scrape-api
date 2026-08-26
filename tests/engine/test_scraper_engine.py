@@ -1,4 +1,3 @@
-# pyright: reportPrivateUsage=false
 import tempfile
 import unittest
 from pathlib import Path
@@ -84,11 +83,13 @@ class ScraperEngineUnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with ScrapeSession(engine, "req-session-1") as session:
-                self.assertIn("req-session-1", engine._active_request_ids)
+                with self.assertRaises(RequestIdCollisionError):
+                    engine.register_request_id("req-session-1")
                 session.prepare_profile_dirs()
                 self.assertTrue(session.profile_dir.is_dir())
 
-            self.assertNotIn("req-session-1", engine._active_request_ids)
+            engine.register_request_id("req-session-1")
+            engine.unregister_request_id("req-session-1")
             self.assertFalse(session.runtime_dir.exists())
 
     def test_effective_user_agent_resolution(self):
