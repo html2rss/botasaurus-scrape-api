@@ -245,6 +245,213 @@ class ScraperEngineUnitTests(unittest.TestCase):
         )
         self.assertIn("chrome binary missing", result.error)
 
+    def test_cleanup_runs_on_navigation_error(self):
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            wait_for_selector="#missing",
+            wait_timeout_seconds=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+            with patch("botasaurus.browser.Driver", FakeDriver):
+                result = engine.execute(payload)
+
+            self.assertIsInstance(result, ScrapeError)
+            assert isinstance(result, ScrapeError)
+            self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
+            self.assertEqual(list(runtime_root.iterdir()), [])
+
+    def test_prepare_profile_dirs_enospc_returns_navigation_error(self):
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+
+            def boom_mkdir(
+                *_args: object, exist_ok: bool = False, **_kwargs: object
+            ) -> None:
+                if exist_ok:
+                    return None
+                raise OSError(28, "No space left on device")
+
+            with (
+                patch("botasaurus.browser.Driver", FakeDriver),
+                patch.object(Path, "mkdir", side_effect=boom_mkdir),
+            ):
+                result = engine.execute(payload)
+
+            self.assertIsInstance(result, ScrapeError)
+            assert isinstance(result, ScrapeError)
+            self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
+            self.assertIn("runtime storage full", result.error)
+            self.assertIsNotNone(result.diagnostics.timeout_phase)
+            assert result.diagnostics.timeout_phase is not None
+            self.assertEqual(result.diagnostics.timeout_phase.value, "boot")
+            self.assertEqual(list(runtime_root.iterdir()), [])
+
+    def test_prune_orphan_runtime_dirs_before_new_request(self):
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            orphan = runtime_root / "stale-request"
+            orphan.mkdir()
+            (orphan / "profile").mkdir()
+
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+            with patch("botasaurus.browser.Driver", FakeDriver):
+                result = engine.execute(payload)
+
+            self.assertIsInstance(result, ScrapeSuccess)
+            self.assertEqual(
+                [entry.name for entry in runtime_root.iterdir()],
+                [],
+            )
+
+    def test_prune_orphan_runtime_dirs_before_http_request(self):
+        from tests.support.fakes import FakeHttpResponse, FakeRequest
+
+        payload = scrape_request(
+            execution_mode="request",
+        )
+        html = "<html><body><h1>Example Domain</h1></body></html>"
+        FakeRequest.response = FakeHttpResponse(
+            text=html,
+            status_code=200,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            orphan = runtime_root / "stale-request"
+            orphan.mkdir()
+            (orphan / "profile").mkdir()
+
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+            with patch("botasaurus.request.Request", FakeRequest):
+                result = engine.execute(payload)
+
+            self.assertIsInstance(result, ScrapeSuccess)
+            assert isinstance(result, ScrapeSuccess)
+            self.assertEqual(result.html, html)
+            self.assertFalse(orphan.exists())
+            self.assertEqual(list(runtime_root.iterdir()), [])
+
+    def test_run_scrape_forwards_driver_kwargs(self):
+        from app.schemas.request import WindowSize
+        from tests.support.fakes import CaptureDriver
+
+        CaptureDriver.last_init_kwargs = None
+        payload = scrape_request(
+            execution_mode="browser",
+            block_images=True,
+            block_images_and_css=True,
+            wait_for_complete_page_load=False,
+            user_agent="MyAgent/1.0",
+            window_size=WindowSize(width=1920, height=1080),
+            lang="en-US",
+            headless=True,
+            proxy="http://proxy.example:8080",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            engine = ScraperEngine(settings=get_settings(), runtime_root=runtime_root)
+            with patch("botasaurus.browser.Driver", CaptureDriver):
+                result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertIsNotNone(CaptureDriver.last_init_kwargs)
+        assert CaptureDriver.last_init_kwargs is not None
+        self.assertTrue(CaptureDriver.last_init_kwargs["block_images"])
+        self.assertTrue(CaptureDriver.last_init_kwargs["block_images_and_css"])
+        self.assertFalse(CaptureDriver.last_init_kwargs["wait_for_complete_page_load"])
+        self.assertEqual(CaptureDriver.last_init_kwargs["user_agent"], "MyAgent/1.0")
+        self.assertEqual(CaptureDriver.last_init_kwargs["window_size"], [1920, 1080])
+        self.assertEqual(CaptureDriver.last_init_kwargs["lang"], "en-US")
+        self.assertTrue(CaptureDriver.last_init_kwargs["headless"])
+        self.assertEqual(
+            CaptureDriver.last_init_kwargs["proxy"], "http://proxy.example:8080"
+        )
+
+    def test_request_tier_blocked_status_escalates_to_browser(self):
+        from tests.support.fakes import ArticleDriver, FakeHttpResponse, FakeRequest
+
+        payload = scrape_request()
+        for status in (401, 403, 429):
+            with self.subTest(status=status):
+                FakeRequest.response = FakeHttpResponse(
+                    text="<html><body>Forbidden</body></html>",
+                    status_code=status,
+                    headers={"content-type": "text/html"},
+                    url="https://example.com/",
+                )
+                with tempfile.TemporaryDirectory() as tmp:
+                    engine = ScraperEngine(
+                        settings=get_settings(), runtime_root=Path(tmp)
+                    )
+                    with (
+                        patch("botasaurus.request.Request", FakeRequest),
+                        patch("botasaurus.browser.Driver", ArticleDriver),
+                    ):
+                        result = engine.execute(payload)
+
+                self.assertIsInstance(result, ScrapeSuccess)
+                assert isinstance(result, ScrapeSuccess)
+                self.assertEqual(
+                    result.diagnostics.execution_tier, ExecutionTier.BROWSER_DRIVER
+                )
+                self.assertIn("<article>", result.html)
+                self.assertIn("Headline", result.html)
+                self.assertIsNotNone(result.headers)
+                assert result.headers is not None
+                self.assertEqual(
+                    result.headers["content-type"], "text/html; charset=utf-8"
+                )
+
+    def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
+        from tests.support.fakes import FakeHttpResponse, FakeRequest
+
+        FakeRequest.response = FakeHttpResponse(
+            text="<html><body><h1>CaffÃ¨</h1></body></html>",
+            status_code=200,
+            headers={"content-type": "application/octet-stream"},
+            url="https://example.com/",
+        )
+        payload = scrape_request(
+            execution_mode="request",
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            with patch("botasaurus.request.Request", FakeRequest):
+                result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        assert isinstance(result, ScrapeSuccess)
+        self.assertEqual(result.diagnostics.execution_tier, ExecutionTier.HTTP_REQUEST)
+        self.assertIsNotNone(result.headers)
+        assert result.headers is not None
+        self.assertEqual(result.headers["content-type"], "text/html; charset=utf-8")
+        self.assertNotIn("application/octet-stream", result.headers.values())
+        self.assertIn("Caffè", result.html)
+        self.assertNotIn("CaffÃ¨", result.html)
+        result.html.encode("utf-8")
+
 
 if __name__ == "__main__":
     unittest.main()
