@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, ClassVar
 
 
@@ -32,12 +31,10 @@ class FakeDriver:
     requests: list[object]
 
     def __init__(self, *args: object, **kwargs: Any) -> None:
-        del args
+        del args, kwargs
         self.page_html = "<html><body><h1>Example Domain</h1></body></html>"
         self.current_url = "https://example.com/"
         self.requests = [FakeRequests()]
-        self._raise_wait = kwargs.pop("raise_wait", False)
-        self.scrolled = False
         self._tab = FakeDriverTab()
 
     def get(self, *_args: object, **_kwargs: Any) -> None:
@@ -53,7 +50,7 @@ class FakeDriver:
         raise RuntimeError("missing selector")
 
     def scroll_to_bottom(self) -> None:
-        self.scrolled = True
+        return None
 
     def scroll(self) -> None:
         return None
@@ -75,9 +72,6 @@ class FakeDriver:
 
     def bypass_cloudflare(self) -> None:
         return None
-
-    def save_screenshot(self, filename: str) -> None:
-        Path(filename).write_bytes(b"fake")
 
     def close(self) -> None:
         return None

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from app.api.deps import ScrapeServiceDep
 from app.api.errors import json_response
@@ -16,7 +16,7 @@ async def _scrape(
     payload: ScrapeRequest,
     service: ScrapeServiceDep,
     x_request_id: str | None = Header(None, alias="X-Request-Id"),
-) -> JSONResponse:
+) -> Response:
     outcome = await service.process(payload, inbound_request_id=x_request_id)
     return json_response(outcome.body, status_code=outcome.status_code)
 

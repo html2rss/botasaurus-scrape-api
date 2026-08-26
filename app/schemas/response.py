@@ -94,10 +94,6 @@ class XhrResponse(BaseModel):
     )
 
 
-def _empty_xhr_responses() -> list[XhrResponse]:
-    return []
-
-
 class ScrapeSuccess(BaseModel):
     url: str = Field(
         description="Requested scrape URL as submitted.",
@@ -134,7 +130,7 @@ class ScrapeSuccess(BaseModel):
         examples=[None],
     )
     xhr_responses: list[XhrResponse] = Field(
-        default_factory=_empty_xhr_responses,
+        default_factory=list[XhrResponse],
         description=(
             "JSON XHR/fetch sub-resource bodies captured on the browser tier "
             "(empty on the HTTP-request tier)."

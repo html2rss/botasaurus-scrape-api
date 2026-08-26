@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import cast
 
-from app.engine.driver_capabilities import DriverProtocol
+from app.engine.driver_capabilities import DriverProtocol, DriverRequestProtocol
 from app.infra.cdp_types import (
     CdpLogMessageEnvelope,
     CdpPerformanceLogEntry,
@@ -32,22 +32,26 @@ class MetadataExtractor:
     def extract_from_requests(
         cls, driver: DriverProtocol
     ) -> tuple[int | None, dict[str, str] | None, str | None]:
-        reqs = getattr(driver, "requests", None)
+        reqs = driver.requests
         if not isinstance(reqs, (list, tuple)):
             return None, None, None
-        for req in reversed(cast(list[object], reqs)):
-            resp = getattr(req, "response", None)
-            status_code = (
-                getattr(resp, "status_code", None) if resp is not None else None
-            )
-            if status_code is not None:
-                headers = getattr(resp, "headers", None)
+        typed_reqs: list[DriverRequestProtocol] = list(
+            cast(list[DriverRequestProtocol], reqs)
+        )
+        for req in reversed(typed_reqs):
+            resp = req.response
+            if resp is not None and resp.status_code is not None:
+                status_code = resp.status_code
+                headers = resp.headers
                 hdr_dict = (
-                    {str(k): str(v) for k, v in dict(headers).items()}
-                    if headers
+                    {
+                        str(k): str(v)
+                        for k, v in cast(dict[object, object], headers).items()
+                    }
+                    if isinstance(headers, dict)
                     else None
                 )
-                req_url = getattr(req, "url", None)
+                req_url = req.url
                 return int(status_code), hdr_dict, str(req_url) if req_url else None
         return None, None, None
 

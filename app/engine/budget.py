@@ -38,4 +38,9 @@ def browser_step_budget_seconds(
 
 
 def is_timeout_exception(exc: Exception) -> bool:
+    if isinstance(exc, TimeoutError):
+        return True
+    name = exc.__class__.__name__.lower()
+    if "timeout" in name:
+        return True
     return "timeout" in str(exc).lower()

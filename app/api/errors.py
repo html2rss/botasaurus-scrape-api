@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict, cast
+from typing import TypedDict, cast
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from app.infra.request_id import resolve_request_id
 from app.logging_config import get_logger
@@ -19,13 +19,13 @@ _NON_FIELD_LOC = {"body", "query", "path", "header"}
 
 
 class ValidationErrorItem(TypedDict, total=False):
-    loc: tuple[Any, ...] | list[Any]
+    loc: tuple[int | str, ...] | list[int | str]
     msg: str
     type: str
-    input: Any
+    input: object
 
 
-def schema_field_from_loc(loc: tuple[Any, ...] | list[Any]) -> str:
+def schema_field_from_loc(loc: tuple[int | str, ...] | list[int | str]) -> str:
     for part in loc:
         if part not in _NON_FIELD_LOC:
             return str(part)
@@ -35,42 +35,44 @@ def schema_field_from_loc(loc: tuple[Any, ...] | list[Any]) -> str:
 def first_schema_field(errors: list[ValidationErrorItem]) -> str:
     if not errors:
         return "unknown"
-    return schema_field_from_loc(errors[0].get("loc") or ())
-
-
-def url_from_validation_body(body: Any) -> str:
-    if isinstance(body, dict):
-        url_value = cast(dict[str, Any], body).get("url")
-        if url_value is not None:
-            return str(url_value)
-    return ""
+    return schema_field_from_loc(errors[0].get("loc", ()))
 
 
 def validation_error_message(errors: list[ValidationErrorItem]) -> str:
     if not errors:
-        return "Request schema validation failed"
-    parts: list[str] = []
-    for err in errors:
-        loc = err.get("loc") or ()
-        field = schema_field_from_loc(loc)
-        message = str(err.get("msg") or "invalid")
-        parts.append(f"{field}: {message}")
-    return "; ".join(parts)
+        return "Request validation failed"
+    first = errors[0]
+    field = schema_field_from_loc(first.get("loc", ()))
+    msg = first.get("msg", "invalid")
+    return f"{field}: {msg}"
 
 
-def json_response(
-    body: ScrapeSuccess | ScrapeError, *, status_code: int
-) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content=body.model_dump(mode="json"))
+def url_from_validation_body(body: object) -> str:
+    if isinstance(body, dict):
+        raw_url = cast(dict[str, object], body).get("url")
+        if isinstance(raw_url, str):
+            return raw_url
+    return ""
+
+
+def json_response(body: ScrapeSuccess | ScrapeError, *, status_code: int) -> Response:
+    return Response(
+        content=body.model_dump_json(),
+        status_code=status_code,
+        media_type="application/json",
+    )
 
 
 async def request_schema_validation_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    errors: list[ValidationErrorItem] = list(exc.errors())  # type: ignore[arg-type]
-    url = url_from_validation_body(exc.body)
+    request: Request, exc: Exception
+) -> Response:
+    validation_exc = (
+        exc if isinstance(exc, RequestValidationError) else RequestValidationError([])
+    )
+    errors: list[ValidationErrorItem] = list(validation_exc.errors())
+    url = url_from_validation_body(validation_exc.body)
     field = first_schema_field(errors)
-    request_id, _ = resolve_request_id(
+    request_id = resolve_request_id(
         request.headers.get("X-Request-Id"),
         host=urlparse(url).hostname if url else None,
     )
@@ -89,10 +91,10 @@ async def request_schema_validation_handler(
     )
 
 
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
     del exc
     logger.exception("unhandled_exception path=%s", request.url.path)
-    request_id, _ = resolve_request_id(request.headers.get("X-Request-Id"))
+    request_id = resolve_request_id(request.headers.get("X-Request-Id"))
     return json_response(
         validation_error(
             "",
@@ -106,6 +108,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(
         RequestValidationError,
-        cast(Any, request_schema_validation_handler),
+        request_schema_validation_handler,
     )
     app.add_exception_handler(Exception, unhandled_exception_handler)

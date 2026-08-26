@@ -11,6 +11,7 @@ from unittest.mock import patch
 from app.config import get_settings
 from app.engine import ScraperEngine
 from app.engine.session import ScrapeSession
+from app.exceptions import RequestIdCollisionError
 from tests.support.fakes import fake_request_cls
 from tests.support.http import test_client
 
@@ -152,10 +153,12 @@ class IsolationRegressionTests(unittest.TestCase):
             request_id = "req-active-track"
             engine.register_request_id(request_id)
             try:
-                self.assertIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
+                with self.assertRaises(RequestIdCollisionError):
+                    engine.register_request_id(request_id)
             finally:
                 engine.unregister_request_id(request_id)
-            self.assertNotIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
+            engine.register_request_id(request_id)
+            engine.unregister_request_id(request_id)
 
     def test_session_unregisters_when_prepare_runtime_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,7 +174,8 @@ class IsolationRegressionTests(unittest.TestCase):
                 ScrapeSession(engine, request_id),
             ):
                 pass
-            self.assertNotIn(request_id, engine._active_request_ids)  # pyright: ignore[reportPrivateUsage]
+            engine.register_request_id(request_id)
+            engine.unregister_request_id(request_id)
 
     def test_prune_keeps_registered_request_dirs(self):
         with tempfile.TemporaryDirectory() as tmp:

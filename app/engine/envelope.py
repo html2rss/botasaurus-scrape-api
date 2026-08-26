@@ -5,7 +5,6 @@ from __future__ import annotations
 from app.infra.detector import ChallengeAssessment
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.response import (
-    ChallengeSignal,
     ScrapeDiagnostics,
     ScrapeError,
     ScrapeSuccess,
@@ -16,11 +15,10 @@ HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
 
 
 def utf8_normalize_html(html: str) -> str:
-    if not html:
+    if not html or html.isascii():
         return html
     try:
         html = html.encode("latin-1").decode("utf-8")
-    # fmt: skip keeps parenthesized except (dev venv predates PEP 758 syntax)
     except (UnicodeEncodeError, UnicodeDecodeError):  # fmt: skip
         pass
     return html.encode("utf-8", errors="replace").decode("utf-8")
@@ -32,11 +30,11 @@ def html_document_headers(
     if not html:
         return html, headers
     normalized = utf8_normalize_html(html)
-    out: dict[str, str] = {}
-    for key, value in (headers or {}).items():
-        if str(key).lower() == "content-type":
-            continue
-        out[str(key)] = str(value)
+    out: dict[str, str] = {
+        str(k): str(v)
+        for k, v in (headers or {}).items()
+        if str(k).lower() != "content-type"
+    }
     out["content-type"] = HTML_DOCUMENT_CONTENT_TYPE
     return normalized, out
 
@@ -51,20 +49,13 @@ def build_diagnostics(
     assessment: ChallengeAssessment | None = None,
     timeout_phase: TimeoutPhase | None = None,
 ) -> ScrapeDiagnostics:
-    challenge = None
-    if assessment is not None:
-        challenge = ChallengeSignal(
-            blocked=assessment.blocked_detected,
-            detected=assessment.challenge_detected,
-            marker=assessment.detected_marker,
-        )
     return ScrapeDiagnostics(
         request_id=request_id,
         attempts=attempts,
         strategy_used=strategy_used,
         render_ms=render_ms,
         execution_tier=execution_tier,
-        challenge=challenge,
+        challenge=assessment.to_signal() if assessment is not None else None,
         timeout_phase=timeout_phase,
     )
 

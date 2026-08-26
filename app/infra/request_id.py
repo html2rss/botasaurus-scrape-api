@@ -13,22 +13,20 @@ _MAX_LENGTH = 128
 _SAFE_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def resolve_request_id(
-    inbound: str | None, *, host: str | None = None
-) -> tuple[str, bool]:
-    """Return a path-safe request id and whether a fallback uuid4 was generated.
+def resolve_request_id(inbound: str | None, *, host: str | None = None) -> str:
+    """Return a path-safe request id or generate a fallback uuid4.
 
     @param inbound optional inbound header value
     @param host optional target hostname for fallback logging
-    @return tuple of resolved id and used_fallback flag
+    @return path-safe request id
     """
     candidate = inbound.strip() if inbound is not None else None
     if candidate is not None and _is_valid(candidate):
-        return candidate, False
+        return candidate
 
     reason = "absent" if not candidate else "invalid"
     logger.info("request_id_fallback host=%s reason=%s", host, reason)
-    return str(uuid.uuid4()), True
+    return str(uuid.uuid4())
 
 
 def _is_valid(value: str | None) -> bool:
