@@ -16,7 +16,6 @@ Most test modules pass strict pyright with no relaxation. The remaining directiv
 
 | Module | Directive | Why |
 | --- | --- | --- |
-| `tests/api/test_request_schema.py` | full blanket line | dozens of raw-dict payload permutations |
 | `tests/api/test_http_contract.py` | full blanket line | walks untyped `app.openapi()` dict |
 | `tests/infra/test_xhr_collector.py` | full blanket line | drives protected handlers on dynamic CDP doubles |
 | `tests/engine/test_timeout_progress.py` | full blanket line | `__getattr__`-based phase-probe driver |

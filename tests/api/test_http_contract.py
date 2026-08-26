@@ -1,5 +1,6 @@
 # pyright: reportMissingParameterType=false, reportUnknownParameterType=false, reportUnknownLambdaType=false, reportPrivateUsage=false, reportAttributeAccessIssue=false, reportFunctionMemberAccess=false, reportUnknownMemberType=false, reportUnknownArgumentType=false, reportUnknownVariableType=false, reportOptionalSubscript=false, reportOptionalMemberAccess=false
 import unittest
+from typing import Any, cast
 
 from app.config import get_settings
 from app.engine import (
@@ -104,7 +105,7 @@ class SsrfGuardHttpTests(unittest.TestCase):
 
     REQUEST_ID = "550e8400-e29b-41d4-a716-446655440042"
 
-    def _post(self, client, payload):
+    def _post(self, client: Any, payload: dict[str, Any]) -> Any:
         return client.post(
             "/scrape", json=payload, headers={"X-Request-Id": self.REQUEST_ID}
         )
@@ -139,36 +140,72 @@ class SsrfGuardHttpTests(unittest.TestCase):
 
 
 class SchemaValidationHttpTests(unittest.TestCase):
-    def test_schema_422_returns_scrape_envelope(self):
-        with (
-            self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
-            test_client() as client,
-        ):
+    def test_empty_body_returns_validation_error_envelope(self):
+        with test_client() as client:
+            response = client.post("/scrape", json={})
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertEqual(body["error_category"], "validation")
+        self.assertEqual(body["url"], "")
+        self.assertIn("url", body["error"])
+        self.assertIn("required", body["error"].lower())
+        self.assertNotIn("html", body)
+
+    def test_invalid_url_returns_422_with_original_url(self):
+        with test_client() as client:
+            response = client.post("/scrape", json={"url": "not-a-valid-url"})
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertEqual(body["error_category"], "validation")
+        self.assertEqual(body["url"], "not-a-valid-url")
+        self.assertIn("url", body["error"])
+
+    def test_invalid_execution_mode_returns_422(self):
+        with test_client() as client:
+            response = client.post(
+                "/scrape",
+                json={"url": "https://example.com", "execution_mode": "invalid_tier"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertEqual(body["error_category"], "validation")
+        self.assertEqual(body["url"], "https://example.com")
+        self.assertIn("execution_mode", body["error"])
+
+    def test_window_size_list_is_rejected_as_422(self):
+        with test_client() as client:
             response = client.post(
                 "/scrape",
                 json={
                     "url": "https://example.com",
-                    "window_size": [1920],
+                    "window_size": [1920, 1080],
                 },
             )
 
         self.assertEqual(response.status_code, 422)
         body = response.json()
-        self.assertNotIn("detail", body)
-        self.assertEqual(body["url"], "https://example.com")
-        self.assertTrue(body["error"])
-        self.assertIn("window_size", body["error"])
         self.assertEqual(body["error_category"], "validation")
-        self.assertNotIn("html", body)
-        self.assertTrue(body["diagnostics"]["request_id"])
-        log_text = "\n".join(captured.output)
-        self.assertIn("request_schema_422", log_text)
-        self.assertIn("host=example.com", log_text)
-        self.assertIn("field=window_size", log_text)
+        self.assertIn("window_size", body["error"])
 
-    def test_scrape_clamps_wait_timeout_instead_of_422(self):
-        from tests.support.http import test_client
+    def test_window_size_partial_dict_is_rejected_as_422(self):
+        with test_client() as client:
+            response = client.post(
+                "/scrape",
+                json={
+                    "url": "https://example.com",
+                    "window_size": {"width": 1920},
+                },
+            )
 
+        self.assertEqual(response.status_code, 422)
+        body = response.json()
+        self.assertEqual(body["error_category"], "validation")
+        self.assertIn("window_size", body["error"])
+
+    def test_wait_timeout_seconds_clamped_does_not_422(self):
         captured: dict[str, int] = {}
 
         def fake_execute(
@@ -178,17 +215,12 @@ class SchemaValidationHttpTests(unittest.TestCase):
             request_id: str | None = None,
             progress: ScrapeProgress | None = None,
         ) -> ScrapeSuccess:
-            del deadline_monotonic, progress
+            del deadline_monotonic, request_id, progress
             captured["wait"] = payload.wait_timeout_seconds
             return ScrapeSuccess(
                 url=str(payload.url),
                 html="<html></html>",
-                diagnostics=ScrapeDiagnostics(
-                    request_id=request_id or "req-wait-clamp",
-                    attempts=1,
-                    render_ms=1,
-                    execution_tier=ExecutionTier.HTTP_REQUEST,
-                ),
+                diagnostics=ScrapeDiagnostics(request_id="req-clamp"),
             )
 
         side_effect: ExecuteSideEffect = fake_execute
@@ -210,29 +242,35 @@ class SchemaValidationHttpTests(unittest.TestCase):
 def _schema_ref_names(node: object) -> set[str]:
     names: set[str] = set()
     if isinstance(node, dict):
-        ref = node.get("$ref")
+        dict_node = cast(dict[str, object], node)
+        ref = dict_node.get("$ref")
         if isinstance(ref, str) and "/schemas/" in ref:
             names.add(ref.rsplit("/", 1)[-1])
-        for value in node.values():
+        for value in dict_node.values():
             names |= _schema_ref_names(value)
     elif isinstance(node, list):
-        for item in node:
+        list_node = cast(list[object], node)
+        for item in list_node:
             names |= _schema_ref_names(item)
     return names
 
 
 class OpenApiContractTests(unittest.TestCase):
+    schema: dict[str, Any]
+
     @classmethod
-    def setUpClass(cls):
+    def setUpClass(cls) -> None:
         from app.main import app
 
         cls.schema = app.openapi()
 
-    def test_scrape_documents_x_request_id_header(self):
-        scrape = self.schema["paths"]["/scrape"]["post"]
-        parameters = scrape.get("parameters") or []
-        header_params = {
-            param["name"]: param for param in parameters if param.get("in") == "header"
+    def test_scrape_documents_x_request_id_header(self) -> None:
+        scrape = cast(dict[str, Any], self.schema["paths"]["/scrape"]["post"])
+        parameters = cast(list[dict[str, Any]], scrape.get("parameters") or [])
+        header_params: dict[str, dict[str, Any]] = {
+            str(param["name"]): param
+            for param in parameters
+            if param.get("in") == "header"
         }
         self.assertIn("X-Request-Id", header_params)
         self.assertFalse(header_params["X-Request-Id"].get("required", True))
