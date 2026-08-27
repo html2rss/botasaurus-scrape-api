@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import shutil
 import tempfile
 import threading
 import time
@@ -115,7 +116,7 @@ class WarmPoolTests(unittest.TestCase):
         # Factory returns before slot is stored; brief spin for store under lock.
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if pool.live_spare_dirs():
+            if pool.ready_spare_dirs():
                 return
             time.sleep(0.001)
         self.fail("spare did not appear in pool")
@@ -144,8 +145,11 @@ class WarmPoolTests(unittest.TestCase):
         driver, spare_dir = hit
         self.assertTrue(spare_dir.name.startswith("spare-"))
         self.assertIs(driver, self.built[0])
+        self.assertEqual(pool.ready_spare_dirs(), set())
+        self.assertEqual(pool.live_spare_dirs(), {spare_dir})
 
         self.assertIsNone(pool.take(fp))
+        pool.release_adopted(spare_dir)
         self.assertEqual(pool.live_spare_dirs(), set())
         pool.shutdown()
 
@@ -192,7 +196,9 @@ class WarmPoolTests(unittest.TestCase):
         # Wake refill loop via public notify (also re-queues same fingerprint).
         pool.notify_scrape_finished(fp)
         self.assertTrue(closed.wait(timeout=2))
-        self.assertEqual(pool.live_spare_dirs(), set())
+        self.assertTrue(self.built[0].closed)
+        # notify also queues refill, so live_spare_dirs may already hold the
+        # in-build or ready replacement — only the reaped driver must be gone.
         pool.shutdown()
 
     def test_shutdown_closes_spare_and_leak_audit(self) -> None:
@@ -277,15 +283,20 @@ class WarmPoolTests(unittest.TestCase):
         self._wait_spare(pool)
         first = pool.take(fp)
         self.assertIsNotNone(first)
+        assert first is not None
+        _, adopted = first
         self.spare_ready.clear()
         pool.notify_scrape_finished(fp)
         self.assertFalse(self.spare_ready.wait(timeout=0.1))
-        self.assertEqual(pool.live_spare_dirs(), set())
+        self.assertEqual(pool.ready_spare_dirs(), set())
+        self.assertEqual(pool.live_spare_dirs(), {adopted})
         self.assertEqual(len(self.built), 1)
         self.clock_value += 31
+        # Deferred wake uses Event timeout (wall clock); nudge via notify.
         pool.notify_scrape_finished(fp)
         self._wait_spare(pool)
         self.assertEqual(len(self.built), 2)
+        pool.release_adopted(adopted)
         pool.shutdown()
 
     def test_memory_pressure_skips_refill(self) -> None:
@@ -294,8 +305,58 @@ class WarmPoolTests(unittest.TestCase):
         fp = _fp()
         pool.notify_scrape_finished(fp)
         self.assertFalse(self.spare_ready.wait(timeout=0.15))
-        self.assertEqual(pool.live_spare_dirs(), set())
+        self.assertEqual(pool.ready_spare_dirs(), set())
         self.assertEqual(len(self.built), 0)
+        # Clearing pressure + advancing past deferred wake should refill.
+        # notify_scrape_finished only re-sets desired + wakes (injected clock
+        # vs Event.wait wall time cannot auto-fire the deferred timeout).
+        self.pressure = False
+        self.clock_value += 2.0
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        self.assertEqual(len(self.built), 1)
+        pool.shutdown()
+
+    def test_prune_after_take_keeps_adopted_spare(self) -> None:
+        pool = self._pool()
+        fp = _fp()
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        hit = pool.take(fp)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        _, spare_dir = hit
+        (spare_dir / "marker").write_text("in-use", encoding="utf-8")
+
+        from app.infra.runtime_cleanup import prune_orphan_runtime_dirs
+
+        removed = prune_orphan_runtime_dirs(
+            self.runtime_root,
+            set(),
+            protected_dirs=pool.live_spare_dirs(),
+        )
+        self.assertEqual(removed, 0)
+        self.assertTrue(spare_dir.is_dir())
+        self.assertTrue((spare_dir / "marker").exists())
+
+        pool.release_adopted(spare_dir)
+        shutil.rmtree(spare_dir, ignore_errors=True)
+        pool.shutdown()
+
+    def test_building_dir_is_protected(self) -> None:
+        self.factory_release.clear()
+        pool = self._pool()
+        fp = _fp()
+        pool.notify_scrape_finished(fp)
+        self.assertTrue(self.factory_started.wait(timeout=2))
+        protected = pool.live_spare_dirs()
+        self.assertEqual(len(protected), 1)
+        building = next(iter(protected))
+        self.assertTrue(building.name.startswith("spare-"))
+        self.assertEqual(pool.ready_spare_dirs(), set())
+        self.factory_release.set()
+        self._wait_spare(pool)
+        self.assertEqual(pool.ready_spare_dirs(), {building})
         pool.shutdown()
 
     def test_factory_runs_on_dedicated_daemon_thread(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import threading
 import time
@@ -84,7 +85,7 @@ class WarmWiringTests(unittest.TestCase):
         self.assertTrue(self.spare_ready.wait(timeout=timeout))
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if pool.live_spare_dirs():
+            if pool.ready_spare_dirs():
                 return
             time.sleep(0.001)
         self.fail("spare missing")
@@ -244,6 +245,30 @@ class WarmWiringTests(unittest.TestCase):
         self.assertEqual(removed, 1)
         self.assertTrue(spare.is_dir())
         self.assertFalse(orphan.exists())
+
+    def test_prune_after_take_keeps_adopted_spare(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        hit = pool.take(fp)
+        self.assertIsNotNone(hit)
+        assert hit is not None
+        driver, spare_dir = hit
+        (spare_dir / "marker").write_text("in-use", encoding="utf-8")
+
+        removed = engine.prune_runtime_dirs()
+        self.assertEqual(removed, 0)
+        self.assertTrue(spare_dir.is_dir())
+        self.assertTrue((spare_dir / "marker").exists())
+
+        driver.close()
+        shutil.rmtree(spare_dir, ignore_errors=True)
+        pool.release_adopted(spare_dir)
+        pool.shutdown()
 
     def test_prewarm_false_leaves_warm_pool_none(self) -> None:
         engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)

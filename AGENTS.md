@@ -131,7 +131,7 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
   - close browser driver
   - delete request runtime dir (and adopted spare dir when present)
   - remove in-memory active request id
-- Before each scrape, prune orphaned runtime dirs not tied to an active request id; live warm spare dirs are protected. Orphan `spare-*` cleaned at pool init. ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
+- Before each scrape, prune orphaned runtime dirs not tied to an active request id; warm-pool `live_spare_dirs()` protects ready, in-build, and adopted-in-use `spare-*` dirs (release via `release_adopted` on session exit). Orphan `spare-*` cleaned at pool init. ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
 - Keep request-id collision/invariant guard (`_active_request_ids`) intact; raises `RequestIdCollisionError`.
 - `driver.requests.get` metadata is best-effort; metadata failure must not fail HTML success.
 - Keep strategy engine behavior:

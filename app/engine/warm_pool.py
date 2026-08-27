@@ -1,7 +1,8 @@
 """Opt-in single-slot prewarmed Chromium driver pool.
 
 Owns spare lifecycle: build, health, TTL, one-shot handoff, refill daemon,
-and shutdown. Request-path code only calls ``take`` / ``notify_scrape_finished``.
+and shutdown. Request-path code only calls ``take`` / ``release_adopted`` /
+``notify_scrape_finished``.
 """
 
 from __future__ import annotations
@@ -35,6 +36,8 @@ PREWARM_HEADLESS_ONLY = False
 CGROUP_MEMORY_CURRENT = Path("/sys/fs/cgroup/memory.current")
 CGROUP_MEMORY_MAX = Path("/sys/fs/cgroup/memory.max")
 MEMORY_PRESSURE_RATIO = 0.70
+# Floor for deferred refill wake when min_refill is 0 (memory-pressure skip).
+MEMORY_PRESSURE_RETRY_SECONDS = 1.0
 
 DriverFactory = Callable[["DriverFingerprint", Path], DriverProtocol]
 HealthCheck = Callable[[DriverProtocol], CdpTabProtocol | None]
@@ -181,11 +184,14 @@ class WarmDriverPool:
         self._spare: _SpareSlot | None = None
         self._desired: DriverFingerprint | None = None
         self._last_refill_at = 0.0
+        self._next_refill_at = 0.0
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._build_count = 0
         self._close_count = 0
         self._building = False
+        self._building_dir: Path | None = None
+        self._adopted_dirs: set[Path] = set()
 
         self._cleanup_orphan_spares()
         self._thread = threading.Thread(
@@ -203,11 +209,22 @@ class WarmDriverPool:
     def close_count(self) -> int:
         return self._close_count
 
-    def live_spare_dirs(self) -> set[Path]:
+    def ready_spare_dirs(self) -> set[Path]:
+        """Dirs for the ready (takeable) slot only."""
         with self._lock:
             if self._spare is None:
                 return set()
             return {self._spare.spare_dir}
+
+    def live_spare_dirs(self) -> set[Path]:
+        """Dirs that must not be pruned: ready, in-build, or adopted-in-use."""
+        with self._lock:
+            dirs = set(self._adopted_dirs)
+            if self._spare is not None:
+                dirs.add(self._spare.spare_dir)
+            if self._building_dir is not None:
+                dirs.add(self._building_dir)
+            return dirs
 
     def take(
         self, fingerprint: DriverFingerprint
@@ -218,22 +235,33 @@ class WarmDriverPool:
             spare = self._spare
             if spare is None or spare.fingerprint != fingerprint:
                 return None
-            if self._health_check(spare.driver) is None:
+            # Claim the slot before health probe so concurrent take cannot race,
+            # and protect the dir from prune while CDP runs outside the lock.
+            self._spare = None
+            self._adopted_dirs.add(spare.spare_dir)
+
+        if self._health_check(spare.driver) is None:
+            with self._lock:
+                self._adopted_dirs.discard(spare.spare_dir)
                 logger.info(
                     "warm_pool_reap reason=unhealthy fingerprint_hash=%s",
                     spare.fingerprint.fingerprint_hash[:12],
                 )
                 self._close_spare_unlocked(spare, reason="unhealthy")
-                self._spare = None
-                return None
-            self._spare = None
-            age_s = self._clock() - spare.created_at
-            logger.info(
-                "warm_pool_state present=false age_s=%.1f fingerprint_hash=%s",
-                age_s,
-                fingerprint.fingerprint_hash[:12],
-            )
-            return spare.driver, spare.spare_dir
+            return None
+
+        age_s = self._clock() - spare.created_at
+        logger.info(
+            "warm_pool_state present=false age_s=%.1f fingerprint_hash=%s",
+            age_s,
+            fingerprint.fingerprint_hash[:12],
+        )
+        return spare.driver, spare.spare_dir
+
+    def release_adopted(self, spare_dir: Path) -> None:
+        """Drop prune protection after the adopting session cleaned up the dir."""
+        with self._lock:
+            self._adopted_dirs.discard(spare_dir)
 
     def notify_scrape_finished(self, fingerprint: DriverFingerprint) -> None:
         if self._stop.is_set():
@@ -261,6 +289,7 @@ class WarmDriverPool:
                         self._close_spare_unlocked(self._spare, reason="shutdown")
                         self._spare = None
                     self._desired = None
+                    self._next_refill_at = 0.0
                     return
             if time.monotonic() >= deadline:
                 break
@@ -274,6 +303,7 @@ class WarmDriverPool:
                 self._close_spare_unlocked(self._spare, reason="shutdown")
                 self._spare = None
             self._desired = None
+            self._next_refill_at = 0.0
 
     def _cleanup_orphan_spares(self) -> None:
         if not self._runtime_root.is_dir():
@@ -295,12 +325,21 @@ class WarmDriverPool:
 
     def _next_wait_seconds(self) -> float | None:
         with self._lock:
-            if self._spare is None or self._idle_ttl_seconds <= 0:
+            waits: list[float] = []
+            now = self._clock()
+            if self._spare is not None and self._idle_ttl_seconds > 0:
+                remaining = self._idle_ttl_seconds - (now - self._spare.created_at)
+                waits.append(max(0.0, remaining))
+            if (
+                self._next_refill_at > 0
+                and self._desired is not None
+                and self._spare is None
+                and not self._building
+            ):
+                waits.append(max(0.0, self._next_refill_at - now))
+            if not waits:
                 return None
-            remaining = self._idle_ttl_seconds - (
-                self._clock() - self._spare.created_at
-            )
-            return max(0.0, remaining)
+            return min(waits)
 
     def _maybe_reap_ttl(self) -> None:
         if self._idle_ttl_seconds <= 0:
@@ -320,6 +359,9 @@ class WarmDriverPool:
             self._close_spare_unlocked(spare, reason="ttl")
             self._spare = None
 
+    def _schedule_deferred_refill(self, not_before: float) -> None:
+        self._next_refill_at = not_before
+
     def _maybe_refill(self) -> None:
         with self._lock:
             if self._stop.is_set():
@@ -336,14 +378,21 @@ class WarmDriverPool:
                 self._last_refill_at > 0
                 and (now - self._last_refill_at) < self._min_refill_seconds
             ):
+                self._schedule_deferred_refill(
+                    self._last_refill_at + self._min_refill_seconds
+                )
                 return
             if self._memory_pressure():
                 logger.info("warm_pool_refill skipped=memory_pressure")
+                delay = max(self._min_refill_seconds, MEMORY_PRESSURE_RETRY_SECONDS)
+                self._schedule_deferred_refill(now + delay)
                 return
             self._building = True
+            self._next_refill_at = 0.0
             fingerprint = desired
+            spare_dir = self._runtime_root / f"spare-{uuid.uuid4()}"
+            self._building_dir = spare_dir
 
-        spare_dir = self._runtime_root / f"spare-{uuid.uuid4()}"
         driver: DriverProtocol | None = None
         try:
             spare_dir.mkdir(parents=True, exist_ok=False)
@@ -382,6 +431,7 @@ class WarmDriverPool:
         finally:
             with self._lock:
                 self._building = False
+                self._building_dir = None
 
     def _close_spare_unlocked(self, spare: _SpareSlot, *, reason: str) -> None:
         del reason

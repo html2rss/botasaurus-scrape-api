@@ -71,4 +71,6 @@ class ScrapeSession:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
             if self.adopted_profile_dir is not None:
                 shutil.rmtree(self.adopted_profile_dir, ignore_errors=True)
+                if self.engine.warm_pool is not None:
+                    self.engine.warm_pool.release_adopted(self.adopted_profile_dir)
             self.engine.unregister_request_id(self.request_id)
