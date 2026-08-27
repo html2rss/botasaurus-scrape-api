@@ -192,12 +192,20 @@ class ScrapeService:
                 phase.value,
                 timeout_result.diagnostics.attempts,
             )
-            emit_terminal_telemetry(timeout_result, http_status=504)
+            emit_terminal_telemetry(
+                timeout_result,
+                http_status=504,
+                warm_hit=progress.snapshot().warm_hit,
+            )
             return ScrapeOutcome(body=timeout_result, status_code=504)
 
         status_code = 200 if isinstance(result, ScrapeSuccess) else 502
         if isinstance(result, ScrapeError):
-            emit_terminal_telemetry(result, http_status=status_code)
+            emit_terminal_telemetry(
+                result,
+                http_status=status_code,
+                warm_hit=progress.snapshot().warm_hit,
+            )
         logger.info(
             "scrape_complete request_id=%s host=%s mode=%s tier=%s attempts=%s status=%d error_category=%s",
             result.diagnostics.request_id,

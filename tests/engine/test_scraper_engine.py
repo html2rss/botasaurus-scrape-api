@@ -47,6 +47,8 @@ class ScraperEngineUnitTests(unittest.TestCase):
 
         monotonic_values = [
             1000.0,  # execute started
+            1000.0,  # boot_started
+            1020.0,  # boot_ms end
             1020.0,  # browser ready after boot
             1020.0,  # remaining total
             1020.0,  # remaining work

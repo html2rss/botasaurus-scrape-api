@@ -12,6 +12,7 @@ from app.api.errors import register_exception_handlers
 from app.api.openapi import configure_openapi
 from app.config import Settings, get_settings
 from app.engine import ScraperEngine
+from app.engine.warm_pool import WarmDriverPool, create_driver_from_fingerprint
 from app.infra.sentry import flush_sentry, setup_sentry
 from app.logging_config import setup_logging
 
@@ -25,11 +26,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.settings = resolved_settings
-        app.state.engine = ScraperEngine(settings=resolved_settings)
+        engine = ScraperEngine(settings=resolved_settings)
+        if resolved_settings.scrape_prewarm:
+            engine.warm_pool = WarmDriverPool(
+                runtime_root=engine.runtime_root,
+                idle_ttl_seconds=resolved_settings.scrape_prewarm_idle_ttl_seconds,
+                min_refill_seconds=float(
+                    resolved_settings.scrape_prewarm_min_refill_seconds
+                ),
+                driver_factory=create_driver_from_fingerprint,
+            )
+        app.state.engine = engine
         app.state.executor = ThreadPoolExecutor(
             max_workers=max(1, resolved_settings.scrape_max_workers)
         )
         yield
+        if engine.warm_pool is not None:
+            engine.warm_pool.shutdown()
         app.state.executor.shutdown(wait=False, cancel_futures=True)
         flush_sentry()
 

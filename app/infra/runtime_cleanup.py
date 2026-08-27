@@ -21,14 +21,22 @@ def runtime_root_low_on_space(
 def prune_orphan_runtime_dirs(
     runtime_root: Path,
     active_request_ids: set[str],
+    *,
+    protected_dirs: set[Path] | None = None,
 ) -> int:
-    """Delete runtime dirs that are not tied to an active request id."""
+    """Delete runtime dirs that are not tied to an active request id.
+
+    ``protected_dirs`` keeps live warm-pool spare directories from being pruned.
+    """
     if not runtime_root.is_dir():
         return 0
 
+    protected = {path.resolve() for path in (protected_dirs or set())}
     removed = 0
     for entry in runtime_root.iterdir():
         if not entry.is_dir() or entry.name in active_request_ids:
+            continue
+        if entry.resolve() in protected:
             continue
         try:
             shutil.rmtree(entry)

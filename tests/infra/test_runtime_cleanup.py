@@ -33,6 +33,22 @@ class RuntimeCleanupTests(unittest.TestCase):
             self.assertFalse(orphan.exists())
             self.assertTrue(active.is_dir())
 
+    def test_prune_orphan_runtime_dirs_keeps_protected_dirs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_root = Path(tmp)
+            spare = runtime_root / "spare-abc"
+            spare.mkdir()
+            orphan = runtime_root / "orphan-req"
+            orphan.mkdir()
+
+            removed = prune_orphan_runtime_dirs(
+                runtime_root, set(), protected_dirs={spare}
+            )
+
+            self.assertEqual(removed, 1)
+            self.assertTrue(spare.is_dir())
+            self.assertFalse(orphan.exists())
+
     def test_prune_orphan_runtime_dirs_noop_when_root_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
             runtime_root = Path(tmp) / "missing"

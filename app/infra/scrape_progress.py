@@ -14,6 +14,7 @@ class ScrapeProgressSnapshot:
     attempts: int = 0
     strategy_used: NavigationMode | None = None
     execution_tier: ExecutionTier | None = None
+    warm_hit: bool | None = None
 
 
 class ScrapeProgress:
@@ -42,6 +43,10 @@ class ScrapeProgress:
         }
         with self._lock:
             self._snap = replace(self._snap, phase=phase, **fields)
+
+    def set_warm_hit(self, warm_hit: bool) -> None:
+        with self._lock:
+            self._snap = replace(self._snap, warm_hit=warm_hit)
 
     def snapshot(self) -> ScrapeProgressSnapshot:
         with self._lock:

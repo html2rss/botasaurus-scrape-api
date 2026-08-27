@@ -42,6 +42,38 @@ MemoryPressureCheck = Callable[[], bool]
 Clock = Callable[[], float]
 
 
+def create_driver_from_fingerprint(
+    fingerprint: DriverFingerprint, spare_dir: Path
+) -> DriverProtocol:
+    """Build a Botasaurus Driver for a warm spare (lazy vendor import)."""
+    from typing import cast
+
+    from botasaurus.browser import Driver
+
+    window_size = (
+        [fingerprint.window_size[0], fingerprint.window_size[1]]
+        if fingerprint.window_size is not None
+        else None
+    )
+    return cast(
+        DriverProtocol,
+        Driver(
+            headless=fingerprint.headless,
+            enable_xvfb_virtual_display=not fingerprint.headless,
+            proxy=fingerprint.proxy,
+            profile=str(spare_dir),
+            tiny_profile=True,
+            block_images=fingerprint.block_images,
+            block_images_and_css=fingerprint.block_images_and_css,
+            wait_for_complete_page_load=fingerprint.wait_for_complete_page_load,
+            user_agent=fingerprint.user_agent,
+            window_size=window_size,
+            lang=fingerprint.lang,
+            remove_default_browser_check_argument=True,
+        ),
+    )
+
+
 def cgroup_memory_under_pressure(
     *,
     ratio: float = MEMORY_PRESSURE_RATIO,

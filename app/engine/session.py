@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import errno
 import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from app.engine.driver_capabilities import DriverProtocol, call_quietly
 
 if TYPE_CHECKING:
     from app.engine.orchestrator import ScraperEngine
+    from app.engine.warm_pool import DriverFingerprint
 
 
 class ScrapeSession:
@@ -21,6 +23,9 @@ class ScrapeSession:
         self.runtime_dir = engine.runtime_root / request_id
         self.profile_dir = self.runtime_dir / "profile"
         self.driver: DriverProtocol | None = None
+        self.adopted_profile_dir: Path | None = None
+        self.warm_fingerprint: DriverFingerprint | None = None
+        self.warm_hit: bool | None = None
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -30,6 +35,17 @@ class ScrapeSession:
             self.engine.unregister_request_id(self.request_id)
             raise
         return self
+
+    def prepare_runtime_dir(self) -> None:
+        """Create the request runtime dir only (warm-path adoption)."""
+        try:
+            self.runtime_dir.mkdir(parents=True, exist_ok=False)
+        except OSError as exc:
+            if exc.errno != errno.ENOSPC:
+                raise
+            shutil.rmtree(self.runtime_dir, ignore_errors=True)
+            self.engine.prune_runtime_dirs()
+            self.runtime_dir.mkdir(parents=True, exist_ok=False)
 
     def prepare_profile_dirs(self) -> None:
         try:
@@ -53,4 +69,6 @@ class ScrapeSession:
                 call_quietly(self.driver, "close")
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
+            if self.adopted_profile_dir is not None:
+                shutil.rmtree(self.adopted_profile_dir, ignore_errors=True)
             self.engine.unregister_request_id(self.request_id)

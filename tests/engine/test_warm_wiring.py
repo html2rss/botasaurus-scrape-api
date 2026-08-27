@@ -1,0 +1,263 @@
+"""Phase 2 wiring tests for prewarmed browser handoff."""
+
+from __future__ import annotations
+
+import tempfile
+import threading
+import time
+import unittest
+from pathlib import Path
+from typing import ClassVar, cast
+from unittest.mock import patch
+
+from app.config import get_settings
+from app.engine import ScraperEngine
+from app.engine.session import ScrapeSession
+from app.engine.warm_pool import (
+    DriverFactory,
+    DriverFingerprint,
+    HealthCheck,
+    WarmDriverPool,
+)
+from app.infra.runtime_cleanup import prune_orphan_runtime_dirs
+from app.schemas.response import ScrapeError, ScrapeSuccess
+from tests.support.factories import scrape_request
+from tests.support.fakes import FakeDriver, FakeDriverTab
+
+
+class TrackingDriver(FakeDriver):
+    instances: ClassVar[list[TrackingDriver]] = []
+    closed_count: ClassVar[int] = 0
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        super().__init__(*args, **kwargs)
+        self.closed = False
+        type(self).instances.append(self)
+
+    def close(self) -> None:
+        self.closed = True
+        type(self).closed_count += 1
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.instances = []
+        cls.closed_count = 0
+
+
+class WarmWiringTests(unittest.TestCase):
+    def setUp(self) -> None:
+        TrackingDriver.reset()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.runtime_root = Path(self.tmp.name)
+        self.built_via_pool: list[TrackingDriver] = []
+        self.spare_ready = threading.Event()
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def _factory(
+        self, fingerprint: DriverFingerprint, spare_dir: Path
+    ) -> TrackingDriver:
+        del fingerprint, spare_dir
+        driver = TrackingDriver()
+        self.built_via_pool.append(driver)
+        self.spare_ready.set()
+        return driver
+
+    def _health_ok(self, _driver: object) -> FakeDriverTab:
+        return FakeDriverTab()
+
+    def _attach_pool(self, engine: ScraperEngine) -> WarmDriverPool:
+        pool = WarmDriverPool(
+            runtime_root=engine.runtime_root,
+            idle_ttl_seconds=600,
+            min_refill_seconds=0,
+            driver_factory=cast(DriverFactory, self._factory),
+            health_check=cast(HealthCheck, self._health_ok),
+            memory_pressure=lambda: False,
+            join_timeout_seconds=2.0,
+        )
+        engine.warm_pool = pool
+        return pool
+
+    def _wait_spare(self, pool: WarmDriverPool, timeout: float = 2.0) -> None:
+        self.assertTrue(self.spare_ready.wait(timeout=timeout))
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if pool.live_spare_dirs():
+                return
+            time.sleep(0.001)
+        self.fail("spare missing")
+
+    def test_warm_hit_skips_driver_factory(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        cold_builds = 0
+
+        def counting_driver(*args: object, **kwargs: object) -> TrackingDriver:
+            nonlocal cold_builds
+            cold_builds += 1
+            return TrackingDriver(*args, **kwargs)
+
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+        with patch("botasaurus.browser.Driver", counting_driver):
+            result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertEqual(cold_builds, 0)
+        self.assertEqual(len(self.built_via_pool), 1)
+        pool.shutdown()
+
+    def test_warm_miss_uses_cold_driver(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+        with patch("botasaurus.browser.Driver", TrackingDriver):
+            result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertEqual(len(TrackingDriver.instances), 1)
+        # Refill after exit builds a spare for the fingerprint.
+        self._wait_spare(pool)
+        pool.shutdown()
+
+    def test_adopted_profile_dir_deleted_on_exit(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        spare_dirs = set(pool.live_spare_dirs())
+        self.assertEqual(len(spare_dirs), 1)
+        spare = next(iter(spare_dirs))
+
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+        with patch("botasaurus.browser.Driver", TrackingDriver):
+            result = engine.execute(payload)
+
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertFalse(spare.exists())
+        pool.shutdown()
+
+    def test_isolation_no_shared_driver_across_requests(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+        drivers: list[TrackingDriver] = []
+
+        with patch("botasaurus.browser.Driver", TrackingDriver):
+            engine.execute(payload, request_id="req-a")
+            drivers.extend(TrackingDriver.instances)
+            self._wait_spare(pool)
+            TrackingDriver.instances = []
+            engine.execute(payload, request_id="req-b")
+            drivers.extend(TrackingDriver.instances)
+            drivers.extend(self.built_via_pool)
+
+        self.assertGreaterEqual(len(drivers), 2)
+        self.assertIsNot(drivers[0], drivers[1])
+        pool.shutdown()
+
+    def test_adoption_failure_closes_spare(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        spare_driver = self.built_via_pool[0]
+
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+
+        def boom_prepare(self: ScrapeSession) -> None:
+            del self
+            raise OSError(28, "No space left on device")
+
+        with (
+            patch.object(ScrapeSession, "prepare_runtime_dir", boom_prepare),
+            patch("botasaurus.browser.Driver", TrackingDriver),
+        ):
+            result = engine.execute(payload)
+
+        self.assertTrue(spare_driver.closed)
+        assert isinstance(result, ScrapeError)
+        self.assertIn("runtime storage full", result.error)
+        pool.shutdown()
+
+    def test_leak_audit_close_count_matches_build_count(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+        )
+        with patch("botasaurus.browser.Driver", TrackingDriver):
+            engine.execute(payload)
+        self._wait_spare(pool)
+        pool.shutdown()
+        self.assertEqual(pool.build_count, pool.close_count)
+
+    def test_prune_keeps_live_spare(self) -> None:
+        spare = self.runtime_root / "spare-live"
+        spare.mkdir()
+        orphan = self.runtime_root / "orphan-req"
+        orphan.mkdir()
+        protected = {spare}
+        removed = prune_orphan_runtime_dirs(
+            self.runtime_root, set(), protected_dirs=protected
+        )
+        self.assertEqual(removed, 1)
+        self.assertTrue(spare.is_dir())
+        self.assertFalse(orphan.exists())
+
+    def test_prewarm_false_leaves_warm_pool_none(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        self.assertIsNone(engine.warm_pool)
+        payload = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+        )
+        with patch("botasaurus.browser.Driver", TrackingDriver):
+            result = engine.execute(payload)
+        self.assertIsInstance(result, ScrapeSuccess)
+        self.assertTrue(TrackingDriver.instances[0].closed)
+
+
+if __name__ == "__main__":
+    unittest.main()
