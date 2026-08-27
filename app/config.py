@@ -65,9 +65,27 @@ class Settings(BaseSettings):
         default=256 * 1024 * 1024,
         validation_alias="SCRAPE_RUNTIME_MIN_FREE_BYTES",
     )
+    scrape_prewarm: bool = Field(default=False, validation_alias="SCRAPE_PREWARM")
+    scrape_prewarm_idle_ttl_seconds: int = Field(
+        default=600,
+        ge=0,
+        validation_alias="SCRAPE_PREWARM_IDLE_TTL_SECONDS",
+    )
+    scrape_prewarm_min_refill_seconds: int = Field(
+        default=30,
+        ge=0,
+        validation_alias="SCRAPE_PREWARM_MIN_REFILL_SECONDS",
+    )
     runtime_root: Path = Field(default=Path("/tmp/scrape"))
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
     sentry: SentrySettings = Field(default_factory=SentrySettings)
+
+    @field_validator("scrape_prewarm", mode="before")
+    @classmethod
+    def parse_scrape_prewarm(cls, value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
 
     @model_validator(mode="after")
     def validate_timeout_relationship(self) -> Settings:
