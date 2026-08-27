@@ -337,6 +337,9 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
 | `SCRAPE_RUNTIME_MIN_FREE_BYTES` | `268435456` (256 MiB) | Prune orphan runtime dirs when free space drops below this threshold. |
+| `SCRAPE_PREWARM` | `false` | Opt-in single-slot Chromium prewarm. When `true`, fingerprint-matching browser scrapes reuse a spare driver built after the previous scrape. Keep off until canary on `--shm-size=1gb` + `init: true` shows stable RSS. |
+| `SCRAPE_PREWARM_IDLE_TTL_SECONDS` | `600` | Close an unused warm spare after this many seconds (`0` = never reap). |
+| `SCRAPE_PREWARM_MIN_REFILL_SECONDS` | `30` | Minimum interval between spare rebuilds. |
 
 ## Example Calls
 
