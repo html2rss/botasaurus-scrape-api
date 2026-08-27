@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from app.engine.driver_capabilities import (
     DriverProtocol,
+    DriverTabProtocol,
     call_if_available,
     call_quietly,
     resolve_callable,
+    resolve_cdp_tab,
 )
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
@@ -82,7 +84,7 @@ def configure_driver(
     target_url: str,
     collector: XhrCollector | None = None,
 ) -> None:
-    tab = getattr(driver, "_tab", None)
+    tab = resolve_cdp_tab(driver)
     if tab is not None:
         if collector is not None:
             try:
@@ -91,7 +93,9 @@ def configure_driver(
                 pass
 
         if payload.block_trackers:
-            call_quietly(tab, "block_urls", TRACKER_URL_PATTERNS)
+            call_quietly(
+                cast(DriverTabProtocol, tab), "block_urls", TRACKER_URL_PATTERNS
+            )
 
     if payload.cookies:
         for c_name, c_val in payload.cookies.items():
@@ -102,7 +106,9 @@ def configure_driver(
             )
 
     if payload.headers and tab is not None:
-        call_quietly(tab, "set_extra_http_headers", payload.headers)
+        call_quietly(
+            cast(DriverTabProtocol, tab), "set_extra_http_headers", payload.headers
+        )
 
 
 def wait_for_readiness(
@@ -151,7 +157,7 @@ def apply_scrolling(driver: DriverProtocol) -> None:
 
 
 def harvest_xhr(collector: XhrCollector, driver: DriverProtocol) -> list[XhrResponse]:
-    tab = getattr(driver, "_tab", None)
+    tab = resolve_cdp_tab(driver)
     if tab is None:
         return collector.results()
     try:
