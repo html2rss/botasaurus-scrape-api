@@ -24,6 +24,7 @@ from app.engine.strategies import (
     resolve_strategies,
     wait_for_readiness,
 )
+from app.engine.warm_pool import DriverFingerprint
 from app.infra.detector import ChallengeAssessment, ChallengeDetector
 from app.infra.metadata import MetadataExtractor, MetadataResult
 from app.infra.scrape_progress import ScrapeProgress
@@ -65,6 +66,28 @@ def settle_page_state(
     return html, meta, assessment, xhr_responses
 
 
+def _boot_storage_error(
+    target_url: str,
+    request_id: str,
+    started_monotonic: float,
+    exc: OSError,
+) -> ScrapeError:
+    if exc.errno == errno.ENOSPC:
+        detail = "Scrape runtime storage full"
+    else:
+        detail = "Scrape runtime storage unavailable"
+    return build_error(
+        target_url,
+        f"{detail}: {exc}",
+        request_id=request_id,
+        attempts=0,
+        render_ms=elapsed_ms(started_monotonic),
+        error_category=ErrorCategory.NAVIGATION_ERROR,
+        execution_tier=ExecutionTier.BROWSER_DRIVER,
+        timeout_phase=TimeoutPhase.BOOT,
+    )
+
+
 def run_browser_tier(
     payload: ScrapeRequest,
     session: ScrapeSession,
@@ -81,67 +104,89 @@ def run_browser_tier(
         TimeoutPhase.BOOT,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
-    try:
-        session.prepare_profile_dirs()
-    except OSError as exc:
-        if exc.errno == errno.ENOSPC:
-            detail = "Scrape runtime storage full"
-        else:
-            detail = "Scrape runtime storage unavailable"
-        return build_error(
-            target_url,
-            f"{detail}: {exc}",
-            request_id=request_id,
-            attempts=0,
-            render_ms=elapsed_ms(started_monotonic),
-            error_category=ErrorCategory.NAVIGATION_ERROR,
-            execution_tier=ExecutionTier.BROWSER_DRIVER,
-            timeout_phase=TimeoutPhase.BOOT,
+    fingerprint = DriverFingerprint.from_request(payload)
+    session.warm_fingerprint = fingerprint
+    warm_hit = False
+    boot_started = time.monotonic()
+
+    pool = session.engine.warm_pool
+    taken = pool.take(fingerprint) if pool is not None else None
+    if taken is not None:
+        driver, spare_dir = taken
+        # Assign immediately so session.__exit__ closes the spare on any raise.
+        session.driver = driver
+        session.profile_dir = spare_dir
+        session.adopted_profile_dir = spare_dir
+        try:
+            session.prepare_runtime_dir()
+        except OSError as exc:
+            return _boot_storage_error(target_url, request_id, started_monotonic, exc)
+        warm_hit = True
+    else:
+        try:
+            session.prepare_profile_dirs()
+        except OSError as exc:
+            return _boot_storage_error(target_url, request_id, started_monotonic, exc)
+
+        driver_window_size = (
+            [payload.window_size.width, payload.window_size.height]
+            if payload.window_size
+            else None
         )
+
+        try:
+            driver = cast(
+                DriverProtocol,
+                Driver(
+                    headless=payload.headless,
+                    enable_xvfb_virtual_display=not payload.headless,
+                    proxy=payload.proxy,
+                    profile=str(session.profile_dir),
+                    tiny_profile=True,
+                    block_images=payload.block_images,
+                    block_images_and_css=payload.block_images_and_css,
+                    wait_for_complete_page_load=payload.wait_for_complete_page_load,
+                    user_agent=payload.effective_user_agent,
+                    window_size=driver_window_size,
+                    lang=payload.lang,
+                    remove_default_browser_check_argument=True,
+                ),
+            )
+        except Exception as exc:
+            is_timeout = is_timeout_exception(exc)
+            return build_error(
+                target_url,
+                str(exc),
+                request_id=request_id,
+                attempts=0,
+                render_ms=elapsed_ms(started_monotonic),
+                error_category=(
+                    ErrorCategory.TIMEOUT
+                    if is_timeout
+                    else ErrorCategory.NAVIGATION_ERROR
+                ),
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                timeout_phase=TimeoutPhase.BOOT,
+            )
+
+        session.driver = driver
+
+    session.warm_hit = warm_hit
+    progress.set_warm_hit(warm_hit)
+    boot_ms = int((time.monotonic() - boot_started) * 1000)
+    logger.info(
+        "scrape_boot request_id=%s warm_hit=%s boot_ms=%d",
+        request_id,
+        warm_hit,
+        boot_ms,
+    )
 
     strategies = resolve_strategies(payload.navigation_mode, payload.max_retries)
     attempts = 0
     collector = XhrCollector(target_url)
-    driver_window_size = (
-        [payload.window_size.width, payload.window_size.height]
-        if payload.window_size
-        else None
-    )
+    driver = session.driver
+    assert driver is not None
 
-    try:
-        driver = cast(
-            DriverProtocol,
-            Driver(
-                headless=payload.headless,
-                enable_xvfb_virtual_display=not payload.headless,
-                proxy=payload.proxy,
-                profile=str(session.profile_dir),
-                tiny_profile=True,
-                block_images=payload.block_images,
-                block_images_and_css=payload.block_images_and_css,
-                wait_for_complete_page_load=payload.wait_for_complete_page_load,
-                user_agent=payload.effective_user_agent,
-                window_size=driver_window_size,
-                lang=payload.lang,
-                remove_default_browser_check_argument=True,
-            ),
-        )
-    except Exception as exc:
-        is_timeout = is_timeout_exception(exc)
-        return build_error(
-            target_url,
-            str(exc),
-            request_id=request_id,
-            attempts=0,
-            render_ms=elapsed_ms(started_monotonic),
-            error_category=(
-                ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
-            ),
-            execution_tier=ExecutionTier.BROWSER_DRIVER,
-            timeout_phase=TimeoutPhase.BOOT,
-        )
-
-    session.driver = driver
     configure_driver(driver, payload, target_url, collector=collector)
     browser_ready_monotonic = time.monotonic()
     progress.mark(

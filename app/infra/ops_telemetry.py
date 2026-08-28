@@ -38,7 +38,11 @@ def _issue_fingerprint(error_category: str, host: str | None) -> list[str]:
 
 
 def _apply_scrape_tags(
-    scope: SentryScope, result: ScrapeError, *, http_status: int
+    scope: SentryScope,
+    result: ScrapeError,
+    *,
+    http_status: int,
+    warm_hit: bool | None = None,
 ) -> None:
     host = _hostname(result.url)
     category = result.error_category.value
@@ -50,6 +54,8 @@ def _apply_scrape_tags(
         scope.set_tag("host", host)
     scope.set_tag("http_status", str(http_status))
     scope.set_tag("render_ms", str(diagnostics.render_ms))
+    if warm_hit is not None:
+        scope.set_tag("warm_hit", "true" if warm_hit else "false")
     scrape_context: dict[str, object] = {
         "request_id": diagnostics.request_id,
         "attempts": diagnostics.attempts,
@@ -64,7 +70,12 @@ def _apply_scrape_tags(
         scope.set_tag("execution_tier", diagnostics.execution_tier.value)
 
 
-def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
+def report_terminal_outcome(
+    result: ScrapeError,
+    *,
+    http_status: int,
+    warm_hit: bool | None = None,
+) -> None:
     """Emit P0 operational scrape failures to Sentry as grouped Issues."""
     from app.infra.sentry import sentry_is_ready
 
@@ -83,7 +94,7 @@ def report_terminal_outcome(result: ScrapeError, *, http_status: int) -> None:
     with sentry_sdk.new_scope() as raw_scope:
         scope = cast(SentryScope, raw_scope)
         scope.fingerprint = _issue_fingerprint(category, host)
-        _apply_scrape_tags(scope, result, http_status=http_status)
+        _apply_scrape_tags(scope, result, http_status=http_status, warm_hit=warm_hit)
         sentry_sdk.capture_message(
             f"scrape terminal failure [{category_label}] host={host or 'unknown'}",
             level="error",
@@ -123,8 +134,13 @@ def record_challenge_block(result: ScrapeError) -> None:
         return
 
 
-def emit_terminal_telemetry(result: ScrapeError, *, http_status: int) -> None:
+def emit_terminal_telemetry(
+    result: ScrapeError,
+    *,
+    http_status: int,
+    warm_hit: bool | None = None,
+) -> None:
     if result.error_category == ErrorCategory.CHALLENGE_BLOCK:
         record_challenge_block(result)
         return
-    report_terminal_outcome(result, http_status=http_status)
+    report_terminal_outcome(result, http_status=http_status, warm_hit=warm_hit)

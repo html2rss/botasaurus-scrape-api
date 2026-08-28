@@ -26,7 +26,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--url",
         default="https://example.com",
-        help="Target URL (execution_mode=request for HTTP tier)",
+        help="Target URL for the scrape payload",
+    )
+    parser.add_argument(
+        "--execution-mode",
+        choices=("request", "browser", "auto"),
+        default="request",
+        help=(
+            "Scrape execution_mode. Use browser with SCRAPE_PREWARM=true in Docker "
+            "(--shm-size=1gb --init) to compare cold vs warm boot_ms from scrape_boot logs."
+        ),
     )
     args = parser.parse_args(argv)
 
@@ -39,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             started = time.perf_counter()
             response = client.post(
                 "/scrape",
-                json={"url": args.url, "execution_mode": "request"},
+                json={"url": args.url, "execution_mode": args.execution_mode},
             )
             elapsed_ms = (time.perf_counter() - started) * 1000
             durations_ms.append(elapsed_ms)
@@ -51,7 +60,10 @@ def main(argv: list[str] | None = None) -> int:
 
     p50 = percentile(durations_ms, 50)
     p95 = percentile(durations_ms, 95)
-    print(f"bench_runs={args.runs} wall_ms_p50={p50:.1f} wall_ms_p95={p95:.1f}")
+    print(
+        f"bench_runs={args.runs} execution_mode={args.execution_mode} "
+        f"wall_ms_p50={p50:.1f} wall_ms_p95={p95:.1f}"
+    )
     if render_ms_values:
         print(
             "render_ms_p50="

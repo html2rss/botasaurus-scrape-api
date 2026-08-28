@@ -186,8 +186,20 @@ class OpsTelemetryTests(unittest.TestCase):
             patch("app.infra.ops_telemetry.report_terminal_outcome") as mock_issue,
         ):
             emit_terminal_telemetry(result, http_status=502)
-            mock_issue.assert_called_once_with(result, http_status=502)
+            mock_issue.assert_called_once_with(result, http_status=502, warm_hit=None)
             mock_metric.assert_not_called()
+
+    def test_report_terminal_outcome_tags_warm_hit_when_provided(self):
+        result = _scrape_error(category=ErrorCategory.TIMEOUT)
+        mock_scope = MagicMock()
+        with (
+            patch("app.infra.sentry.sentry_is_ready", return_value=True),
+            patch("sentry_sdk.new_scope") as mock_new_scope,
+            patch("sentry_sdk.capture_message"),
+        ):
+            mock_new_scope.return_value.__enter__.return_value = mock_scope
+            report_terminal_outcome(result, http_status=504, warm_hit=True)
+            mock_scope.set_tag.assert_any_call("warm_hit", "true")
 
 
 if __name__ == "__main__":

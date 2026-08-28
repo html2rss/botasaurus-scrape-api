@@ -14,6 +14,7 @@ from app.engine.budget import elapsed_ms, is_timeout_exception
 from app.engine.envelope import build_error
 from app.engine.request_tier import run_request_tier
 from app.engine.session import ScrapeSession
+from app.engine.warm_pool import DriverFingerprint, WarmDriverPool
 from app.exceptions import RequestIdCollisionError
 from app.infra.runtime_cleanup import (
     prune_orphan_runtime_dirs,
@@ -47,6 +48,7 @@ class ScraperEngine:
         self.runtime_root = runtime_root or self.settings.runtime_root
         self._active_request_ids: set[str] = set()
         self._active_request_ids_lock = threading.Lock()
+        self.warm_pool: WarmDriverPool | None = None
 
     def register_request_id(self, request_id: str) -> None:
         with self._active_request_ids_lock:
@@ -59,11 +61,17 @@ class ScraperEngine:
             self._active_request_ids.discard(request_id)
 
     def prune_runtime_dirs(self) -> int:
-        # Hold the lock for the full prune so a newly registered request cannot
-        # create its runtime dir and then be deleted from a stale snapshot.
+        # Active request ids and spare dirs are snapshotted atomically for prune.
         with self._active_request_ids_lock:
+            protected: set[Path] = (
+                self.warm_pool.live_spare_dirs()
+                if self.warm_pool is not None
+                else set()
+            )
             return prune_orphan_runtime_dirs(
-                self.runtime_root, set(self._active_request_ids)
+                self.runtime_root,
+                set(self._active_request_ids),
+                protected_dirs=protected,
             )
 
     def prepare_runtime_for_request(self) -> None:
@@ -107,57 +115,66 @@ class ScraperEngine:
                 timeout_phase=TimeoutPhase.QUEUE,
             )
 
-        with ScrapeSession(self, resolved_request_id) as session:
-            should_try_request_tier = (
-                payload.execution_mode == ExecutionMode.REQUEST
-                or (
-                    payload.execution_mode == ExecutionMode.AUTO
-                    and payload.navigation_mode == NavigationMode.AUTO
-                    and not payload.wait_for_selector
-                    and not payload.scroll
+        warm_fp: DriverFingerprint | None = None
+        try:
+            with ScrapeSession(self, resolved_request_id) as session:
+                should_try_request_tier = (
+                    payload.execution_mode == ExecutionMode.REQUEST
+                    or (
+                        payload.execution_mode == ExecutionMode.AUTO
+                        and payload.navigation_mode == NavigationMode.AUTO
+                        and not payload.wait_for_selector
+                        and not payload.scroll
+                    )
                 )
-            )
 
-            if should_try_request_tier:
-                try:
-                    request_result = run_request_tier(
-                        payload,
-                        resolved_request_id,
-                        started_monotonic,
-                        progress,
-                        settings=self.settings,
-                    )
-                    if request_result is not None:
-                        return request_result
-                except Exception as exc:
-                    logger.info(
-                        "request_tier_failed request_id=%s host=%s error=%s",
-                        resolved_request_id,
-                        urlparse(target_url).hostname,
-                        str(exc),
-                    )
-                    if payload.execution_mode == ExecutionMode.REQUEST:
-                        render_ms = elapsed_ms(started_monotonic)
-                        is_timeout = is_timeout_exception(exc)
-                        return build_error(
-                            target_url,
-                            str(exc),
-                            request_id=resolved_request_id,
-                            attempts=1,
-                            render_ms=render_ms,
-                            error_category=(
-                                ErrorCategory.TIMEOUT
-                                if is_timeout
-                                else ErrorCategory.NAVIGATION_ERROR
-                            ),
-                            execution_tier=ExecutionTier.HTTP_REQUEST,
-                            timeout_phase=TimeoutPhase.WORK if is_timeout else None,
+                if should_try_request_tier:
+                    try:
+                        request_result = run_request_tier(
+                            payload,
+                            resolved_request_id,
+                            started_monotonic,
+                            progress,
+                            settings=self.settings,
                         )
+                        if request_result is not None:
+                            warm_fp = session.warm_fingerprint
+                            return request_result
+                    except Exception as exc:
+                        logger.info(
+                            "request_tier_failed request_id=%s host=%s error=%s",
+                            resolved_request_id,
+                            urlparse(target_url).hostname,
+                            str(exc),
+                        )
+                        if payload.execution_mode == ExecutionMode.REQUEST:
+                            render_ms = elapsed_ms(started_monotonic)
+                            is_timeout = is_timeout_exception(exc)
+                            warm_fp = session.warm_fingerprint
+                            return build_error(
+                                target_url,
+                                str(exc),
+                                request_id=resolved_request_id,
+                                attempts=1,
+                                render_ms=render_ms,
+                                error_category=(
+                                    ErrorCategory.TIMEOUT
+                                    if is_timeout
+                                    else ErrorCategory.NAVIGATION_ERROR
+                                ),
+                                execution_tier=ExecutionTier.HTTP_REQUEST,
+                                timeout_phase=TimeoutPhase.WORK if is_timeout else None,
+                            )
 
-            return run_browser_tier(
-                payload,
-                session,
-                started_monotonic,
-                progress,
-                settings=self.settings,
-            )
+                result = run_browser_tier(
+                    payload,
+                    session,
+                    started_monotonic,
+                    progress,
+                    settings=self.settings,
+                )
+                warm_fp = session.warm_fingerprint
+                return result
+        finally:
+            if self.warm_pool is not None and warm_fp is not None:
+                self.warm_pool.notify_scrape_finished(warm_fp)

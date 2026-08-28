@@ -28,6 +28,7 @@ app/
     budget.py                # wall-clock budget math shared across tiers (elapsed_ms, step budgets)
     request_tier.py          # HTTP/curl_cffi path
     browser_tier.py          # Chromium path
+    warm_pool.py             # opt-in WarmDriverPool + DriverFingerprint
     strategies.py            # NavigationMode resolution, driver helpers
     driver_capabilities.py   # DriverProtocol + call_if_available adapter
     envelope.py              # success/error builders, UTF-8 HTML normalization
@@ -90,10 +91,11 @@ Conventions:
 | --- | --- | --- |
 | `ScraperEngine` | process (app.state) | shared |
 | `ThreadPoolExecutor` | process (app.state) | shared, sized by `SCRAPE_MAX_WORKERS` |
+| `WarmDriverPool` (opt-in) | process (engine.warm_pool) | single spare slot; refill on dedicated daemon thread — never the scrape executor |
 | `_active_request_ids` | in-process memory | shared; collision guard |
 | runtime dir `/tmp/scrape/<request_id>` | per request | isolated; deleted in `finally` |
-| browser profile | per request | isolated; no reuse |
-| Botasaurus Driver | per request | isolated; closed in `finally` |
+| browser profile | per request (or adopted spare-*) | isolated; no reuse across requests; warm spare dies with the adopting request |
+| Botasaurus Driver | may start before assignment | usage stays ≤1 request; closed in session `__exit__`; never returned to the pool |
 
 Multi-worker uvicorn breaks in-process collision detection unless request ids are sticky to a worker. Default to single-worker for isolation semantics.
 
@@ -122,13 +124,14 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 - `POST /scrape` is async API over sync browser work (threadpool).
 - Each scrape request must use isolated runtime state:
   - request-scoped runtime dir `/tmp/scrape/<request_id>`
-  - request-scoped browser profile
-  - no cache/profile/driver reuse across requests
+  - request-scoped browser profile (cold path) or one-shot adopted `spare-*` profile (warm path)
+  - no cache/profile/driver reuse across requests (warm spare is closed after the adopting request)
+- Opt-in prewarm (`SCRAPE_PREWARM=true`, default off): single-slot `WarmDriverPool` builds a spare after a browser scrape finishes when the fingerprint matches. Refill runs on a dedicated daemon thread. Idle TTL (`SCRAPE_PREWARM_IDLE_TTL_SECONDS`, default `600`, `0`=never) and min refill interval (`SCRAPE_PREWARM_MIN_REFILL_SECONDS`, default `30`) bound idle RAM. Worst case during refill overlap: 2 Chromiums briefly. Cgroup-v2 best-effort skip above 70% memory. Docker Xvfb spike confirmed concurrent headed drivers are safe (`PREWARM_HEADLESS_ONLY=False`).
 - Cleanup is mandatory in `finally`:
   - close browser driver
-  - delete request runtime dir
+  - delete request runtime dir (and adopted spare dir when present)
   - remove in-memory active request id
-- Before each scrape, prune orphaned runtime dirs not tied to an active request id; ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
+- Before each scrape, prune orphaned runtime dirs not tied to an active request id; warm-pool `live_spare_dirs()` protects ready, in-build, and adopted-in-use `spare-*` dirs (release via `release_adopted` on session exit). Orphan `spare-*` cleaned at pool init. ENOSPC on profile creation retries after another prune pass. Optional `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs when the runtime filesystem is low.
 - Keep request-id collision/invariant guard (`_active_request_ids`) intact; raises `RequestIdCollisionError`.
 - `driver.requests.get` metadata is best-effort; metadata failure must not fail HTML success.
 - Keep strategy engine behavior:
@@ -142,8 +145,9 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 ## Performance
 
 - Baseline bench: `PYTHONPATH=. .venv/bin/python3 scripts/bench_scrape.py --runs 10` (TestClient, `execution_mode=request`).
+- Browser cold vs warm: `SCRAPE_PREWARM=true` with `--execution-mode browser` (local Docker with `--shm-size=1gb --init` recommended); compare `boot_ms` from `scrape_boot` logs / p50 wall time. Record p50 `boot_ms` delta in the PR body when opening a prewarm PR.
 - Record p50 wall time when changing hot paths; avoid regressions vs prior baseline.
-- On low-RAM hosts (Docker `--memory=768m`, 1–2 vCPU), tune `SCRAPE_MAX_WORKERS` to `1` or `2`; higher values increase queue wait and swap without improving wall time.
+- On low-RAM hosts (Docker `--memory=768m`, 1–2 vCPU), tune `SCRAPE_MAX_WORKERS` to `1` or `2`; higher values increase queue wait and swap without improving wall time. Keep prewarm default-off until canary shows no RSS ceiling breach.
 - Browser tier skips XHR harvest before Cloudflare bypass; one consolidated `collect_page_state` pass runs after bypass.
 
 ## Types
@@ -164,6 +168,9 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 - Run `make check` before finish (lint, test, typecheck, openapi-verify).
 - When Pydantic models or route response metadata change, run `make openapi` and commit the snapshot with the code change.
 - When API contract, Docker behavior, or error semantics change, also run `make smoke`.
-- `make smoke` must cover build, boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation check, localhost guardrail.
+- `make smoke` (default `SMOKE_PROFILE=all`) covers prewarm **off** and **on**:
+  - `contract-prewarm-off` — build/boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation (httpbingo cookies), localhost SSRF, request-tier, headers, `organic_get`, scroll, Sentry sidecar init.
+  - `prewarm-on-warm-handoff` — `SCRAPE_PREWARM=true`, two browser `example.com` scrapes, assert `scrape_boot warm_hit=False` then refill then `warm_hit=True` (no isolation pair; that stays on the off profile).
+  - CI Checks titles: `Smoke (prewarm=false, cold)` and `Smoke (prewarm=true, warm-handoff)`. One `docker-smoke-image` job warms Buildx GHA cache (`scope=smoke-linux-amd64`); matrix jobs `cache-from` + `SMOKE_SKIP_BUILD=1`.
 - If API contract, Docker behavior, or error semantics changed, update README in same change.
 - Keep commits scoped (infra vs API vs docs).
