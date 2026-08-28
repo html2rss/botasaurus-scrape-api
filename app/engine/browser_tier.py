@@ -67,11 +67,24 @@ def settle_page_state(
 
 
 def _inspect_assessment(
-    driver: DriverProtocol, target_url: str
+    driver: DriverProtocol, _target_url: str
 ) -> ChallengeAssessment | None:
-    """Best-effort challenge assessment after a nav/timeout exception."""
+    """Best-effort challenge assessment after a nav/timeout exception.
+
+    Lean path only: html + passive request status + driver signals via
+    ChallengeDetector. Skips CDP log walks that can stall on a hung page.
+    Metadata failures must not discard HTML/driver challenge signals.
+    """
     try:
-        return _page_state(driver, target_url)[2]
+        html = driver.page_html or ""
+    except Exception:
+        return None
+    try:
+        status_code, _, _ = MetadataExtractor.extract_from_requests(driver)
+    except Exception:
+        status_code = None
+    try:
+        return ChallengeDetector.detect(html, status_code, driver=driver)
     except Exception:
         return None
 
@@ -100,11 +113,29 @@ def _challenge_block_error(
     )
 
 
-def _should_retry_challenge(
-    assessment: ChallengeAssessment, *, has_more_strategies: bool
-) -> bool:
-    """Soft challenge markers may retry strategies; hard HTTP blocks do not."""
-    return assessment.challenge_detected and has_more_strategies
+def _unclean_retry_or_block(
+    target_url: str,
+    *,
+    request_id: str,
+    attempts: int,
+    strategy: NavigationMode,
+    started_monotonic: float,
+    assessment: ChallengeAssessment,
+    has_more_strategies: bool,
+    collector: XhrCollector,
+) -> ScrapeError | None:
+    """Retry soft challenges; otherwise return challenge_block. None ⇒ continue."""
+    if assessment.may_retry_strategies(has_more=has_more_strategies):
+        collector.reset()
+        return None
+    return _challenge_block_error(
+        target_url,
+        request_id=request_id,
+        attempts=attempts,
+        strategy=strategy,
+        render_ms=elapsed_ms(started_monotonic),
+        assessment=assessment,
+    )
 
 
 def _boot_storage_error(
@@ -130,35 +161,15 @@ def _boot_storage_error(
     )
 
 
-def _boot_driver_error(
-    target_url: str,
-    request_id: str,
-    started_monotonic: float,
-    exc: Exception,
-) -> ScrapeError:
-    is_timeout = is_timeout_exception(exc)
-    return build_error(
-        target_url,
-        str(exc),
-        request_id=request_id,
-        attempts=0,
-        render_ms=elapsed_ms(started_monotonic),
-        error_category=(
-            ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
-        ),
-        execution_tier=ExecutionTier.BROWSER_DRIVER,
-        timeout_phase=TimeoutPhase.BOOT,
-    )
-
-
-def _work_exception_error(
+def _tier_exception_error(
     target_url: str,
     *,
     request_id: str,
     attempts: int,
-    strategy: NavigationMode,
+    strategy: NavigationMode | None,
     started_monotonic: float,
     exc: Exception,
+    timeout_phase: TimeoutPhase | None,
 ) -> ScrapeError:
     is_timeout = is_timeout_exception(exc)
     return build_error(
@@ -172,7 +183,7 @@ def _work_exception_error(
             ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
         ),
         execution_tier=ExecutionTier.BROWSER_DRIVER,
-        timeout_phase=TimeoutPhase.WORK if is_timeout else None,
+        timeout_phase=timeout_phase,
     )
 
 
@@ -241,7 +252,15 @@ def run_browser_tier(
                 ),
             )
         except Exception as exc:
-            return _boot_driver_error(target_url, request_id, started_monotonic, exc)
+            return _tier_exception_error(
+                target_url,
+                request_id=request_id,
+                attempts=0,
+                strategy=None,
+                started_monotonic=started_monotonic,
+                exc=exc,
+                timeout_phase=TimeoutPhase.BOOT,
+            )
 
         session.driver = driver
 
@@ -305,18 +324,19 @@ def run_browser_tier(
                     attempt_index,
                     assessment.detected_marker,
                 )
-                if _should_retry_challenge(assessment, has_more_strategies=has_more):
-                    collector.reset()
-                    continue
-
-                return _challenge_block_error(
+                blocked = _unclean_retry_or_block(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
-                    render_ms=elapsed_ms(started_monotonic),
+                    started_monotonic=started_monotonic,
                     assessment=assessment,
+                    has_more_strategies=has_more,
+                    collector=collector,
                 )
+                if blocked is None:
+                    continue
+                return blocked
 
             return build_success(
                 target_url,
@@ -347,28 +367,33 @@ def run_browser_tier(
             # Prefer knowable challenge over timeout when the page is inspectable.
             assessment = _inspect_assessment(driver, target_url)
             if assessment is not None and not assessment.is_clean:
-                if _should_retry_challenge(assessment, has_more_strategies=has_more):
-                    collector.reset()
-                    continue
-                return _challenge_block_error(
+                blocked = _unclean_retry_or_block(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
-                    render_ms=elapsed_ms(started_monotonic),
+                    started_monotonic=started_monotonic,
                     assessment=assessment,
+                    has_more_strategies=has_more,
+                    collector=collector,
                 )
+                if blocked is None:
+                    continue
+                return blocked
             if has_more:
                 collector.reset()
                 continue
 
-            return _work_exception_error(
+            return _tier_exception_error(
                 target_url,
                 request_id=request_id,
                 attempts=attempts,
                 strategy=strategy,
                 started_monotonic=started_monotonic,
                 exc=exc,
+                timeout_phase=(
+                    TimeoutPhase.WORK if is_timeout_exception(exc) else None
+                ),
             )
 
     return build_error(

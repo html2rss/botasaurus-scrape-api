@@ -26,142 +26,113 @@ class _PassiveRequest:
         )()
 
 
-class _ChallengeHtmlDriver(FakeDriver):
-    """Timeout on navigate while page already shows a challenge interstitial."""
+class _ScenarioDriver(FakeDriver):
+    """Shared navigate counter + optional timeout / HTTP status fixtures."""
 
     navigate_calls: ClassVar[int] = 0
+    page_body: ClassVar[str] = "<html><body>ok</body></html>"
+    timeout_on_nav: ClassVar[bool] = False
+    http_status: ClassVar[int | None] = None
 
     def __init__(self, *args: object, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self.page_html = "<html>Just a moment...</html>"
+        self.page_html = type(self).page_body
         self.current_url = "https://example.com/"
+        status = type(self).http_status
+        if status is not None:
+            self.requests = [_PassiveRequest(status, "https://example.com/")]
 
     @classmethod
     def reset(cls) -> None:
         cls.navigate_calls = 0
 
-    def get(self, *_args: object, **_kwargs: Any) -> None:
+    def _navigate(self) -> None:
         type(self).navigate_calls += 1
-        raise TimeoutError("Navigation timeout after 15s")
-
-    def google_get(self, *_args: object, **_kwargs: Any) -> None:
-        type(self).navigate_calls += 1
-        raise TimeoutError("Navigation timeout after 15s")
-
-
-class _CleanTimeoutDriver(FakeDriver):
-    """Timeout on navigate with a clean page body."""
-
-    def __init__(self, *args: object, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.page_html = "<html><body><h1>Example Domain</h1></body></html>"
-        self.current_url = "https://example.com/"
+        if type(self).timeout_on_nav:
+            raise TimeoutError("Navigation timeout after 15s")
 
     def get(self, *_args: object, **_kwargs: Any) -> None:
-        raise TimeoutError("Navigation timeout after 15s")
+        self._navigate()
 
     def google_get(self, *_args: object, **_kwargs: Any) -> None:
-        raise TimeoutError("Navigation timeout after 15s")
+        self._navigate()
 
 
-class _HardBlockDriver(FakeDriver):
-    """HTTP hard block without challenge marker — must not burn more strategies."""
-
+class _ChallengeHtmlDriver(_ScenarioDriver):
     navigate_calls: ClassVar[int] = 0
-
-    def __init__(self, *args: object, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.page_html = "<html><h1>Forbidden</h1></body></html>"
-        self.current_url = "https://example.com/"
-        self.requests = [_PassiveRequest(403, "https://example.com/")]
-
-    @classmethod
-    def reset(cls) -> None:
-        cls.navigate_calls = 0
-
-    def get(self, *_args: object, **_kwargs: Any) -> None:
-        type(self).navigate_calls += 1
-
-    def google_get(self, *_args: object, **_kwargs: Any) -> None:
-        type(self).navigate_calls += 1
+    page_body = "<html>Just a moment...</html>"
+    timeout_on_nav = True
 
 
-class _SoftChallengeDriver(FakeDriver):
-    """Soft challenge marker — may retry remaining strategies."""
+class _CleanTimeoutDriver(_ScenarioDriver):
+    page_body = "<html><body><h1>Example Domain</h1></body></html>"
+    timeout_on_nav = True
 
+
+class _HardBlockDriver(_ScenarioDriver):
     navigate_calls: ClassVar[int] = 0
+    page_body = "<html><h1>Forbidden</h1></body></html>"
+    http_status = 403
 
-    def __init__(self, *args: object, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        self.page_html = "<html>Just a moment...</html>"
-        self.current_url = "https://example.com/"
 
-    @classmethod
-    def reset(cls) -> None:
-        cls.navigate_calls = 0
-
-    def get(self, *_args: object, **_kwargs: Any) -> None:
-        type(self).navigate_calls += 1
-
-    def google_get(self, *_args: object, **_kwargs: Any) -> None:
-        type(self).navigate_calls += 1
+class _SoftChallengeDriver(_ScenarioDriver):
+    navigate_calls: ClassVar[int] = 0
+    page_body = "<html>Just a moment...</html>"
 
 
 class BrowserTierChallengeTests(unittest.TestCase):
-    def test_timeout_with_challenge_html_returns_challenge_block(self) -> None:
-        _ChallengeHtmlDriver.reset()
+    def _execute(
+        self,
+        driver_cls: type[_ScenarioDriver],
+        *,
+        navigation_mode: NavigationMode,
+        max_retries: int,
+        request_id: str,
+    ) -> ScrapeError:
+        driver_cls.reset()
         payload = scrape_request(
             execution_mode=ExecutionMode.BROWSER,
-            navigation_mode=NavigationMode.GET,
-            max_retries=0,
+            navigation_mode=navigation_mode,
+            max_retries=max_retries,
         )
-
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("botasaurus.browser.Driver", _ChallengeHtmlDriver):
-                result = engine.execute(payload, request_id="req-timeout-challenge")
-
+            with patch("botasaurus.browser.Driver", driver_cls):
+                result = engine.execute(payload, request_id=request_id)
         self.assertIsInstance(result, ScrapeError)
         assert isinstance(result, ScrapeError)
+        return result
+
+    def test_timeout_with_challenge_html_returns_challenge_block(self) -> None:
+        result = self._execute(
+            _ChallengeHtmlDriver,
+            navigation_mode=NavigationMode.GET,
+            max_retries=0,
+            request_id="req-timeout-challenge",
+        )
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
         self.assertIsNone(result.diagnostics.timeout_phase)
-        self.assertIsNotNone(result.diagnostics.challenge)
         assert result.diagnostics.challenge is not None
         self.assertTrue(result.diagnostics.challenge.detected)
         self.assertEqual(_ChallengeHtmlDriver.navigate_calls, 1)
 
     def test_timeout_with_clean_page_returns_timeout_work(self) -> None:
-        payload = scrape_request(
-            execution_mode=ExecutionMode.BROWSER,
+        result = self._execute(
+            _CleanTimeoutDriver,
             navigation_mode=NavigationMode.GET,
             max_retries=0,
+            request_id="req-timeout-clean",
         )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("botasaurus.browser.Driver", _CleanTimeoutDriver):
-                result = engine.execute(payload, request_id="req-timeout-clean")
-
-        self.assertIsInstance(result, ScrapeError)
-        assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.TIMEOUT)
         self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.WORK)
 
     def test_hard_block_aborts_remaining_strategies(self) -> None:
-        _HardBlockDriver.reset()
-        payload = scrape_request(
-            execution_mode=ExecutionMode.BROWSER,
+        result = self._execute(
+            _HardBlockDriver,
             navigation_mode=NavigationMode.AUTO,
             max_retries=2,
+            request_id="req-hard-block",
         )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("botasaurus.browser.Driver", _HardBlockDriver):
-                result = engine.execute(payload, request_id="req-hard-block")
-
-        self.assertIsInstance(result, ScrapeError)
-        assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
         self.assertIsNone(result.diagnostics.timeout_phase)
         self.assertEqual(result.diagnostics.attempts, 1)
@@ -171,20 +142,12 @@ class BrowserTierChallengeTests(unittest.TestCase):
         self.assertFalse(result.diagnostics.challenge.detected)
 
     def test_soft_challenge_retries_strategies_then_blocks(self) -> None:
-        _SoftChallengeDriver.reset()
-        payload = scrape_request(
-            execution_mode=ExecutionMode.BROWSER,
+        result = self._execute(
+            _SoftChallengeDriver,
             navigation_mode=NavigationMode.AUTO,
             max_retries=2,
+            request_id="req-soft-challenge",
         )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
-            with patch("botasaurus.browser.Driver", _SoftChallengeDriver):
-                result = engine.execute(payload, request_id="req-soft-challenge")
-
-        self.assertIsInstance(result, ScrapeError)
-        assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
         self.assertEqual(result.diagnostics.attempts, 3)
         self.assertEqual(_SoftChallengeDriver.navigate_calls, 3)
