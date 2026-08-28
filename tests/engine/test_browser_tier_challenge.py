@@ -177,3 +177,34 @@ class BrowserTierChallengeTests(unittest.TestCase):
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
         self.assertEqual(result.diagnostics.attempts, 1)
         self.assertEqual(_SoftChallengeDriver.navigate_calls, 1)
+
+    def test_mid_wait_challenge_returns_challenge_block(self) -> None:
+        class _MidWaitChallengeDriver(_ScenarioDriver):
+            navigate_calls: ClassVar[int] = 0
+            page_body = "<html>Just a moment...</html>"
+            wait_calls: ClassVar[int] = 0
+
+            def wait_for_element(self, *_args: object, **_kwargs: Any) -> None:
+                type(self).wait_calls += 1
+                raise TimeoutError("element not found")
+
+        _MidWaitChallengeDriver.reset()
+        _MidWaitChallengeDriver.wait_calls = 0
+        payload = scrape_request(
+            execution_mode=ExecutionMode.BROWSER,
+            navigation_mode=NavigationMode.GET,
+            max_retries=0,
+            wait_for_selector="#content",
+            wait_timeout_seconds=4,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            with patch("botasaurus.browser.Driver", _MidWaitChallengeDriver):
+                result = engine.execute(payload, request_id="req-mid-wait")
+        self.assertIsInstance(result, ScrapeError)
+        assert isinstance(result, ScrapeError)
+        self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
+        self.assertIsNone(result.diagnostics.timeout_phase)
+        # First chunk probes challenge and fails closed — no full 4s burn.
+        self.assertEqual(_MidWaitChallengeDriver.wait_calls, 1)
+        self.assertEqual(_MidWaitChallengeDriver.navigate_calls, 1)

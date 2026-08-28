@@ -67,9 +67,7 @@ def settle_page_state(
     return html, meta, assessment, xhr_responses
 
 
-def _inspect_assessment(
-    driver: DriverProtocol, _target_url: str
-) -> ChallengeAssessment | None:
+def _inspect_assessment(driver: DriverProtocol) -> ChallengeAssessment | None:
     """Best-effort challenge assessment after a nav/timeout exception.
 
     Lean path only: html + passive request status + driver signals via
@@ -114,7 +112,7 @@ def _challenge_block_error(
     )
 
 
-def _unclean_retry_or_block(
+def _surface_unclean(
     target_url: str,
     *,
     request_id: str,
@@ -126,7 +124,16 @@ def _unclean_retry_or_block(
     remaining_work: int,
     collector: XhrCollector,
 ) -> ScrapeError | None:
-    """Retry soft challenges; otherwise return challenge_block. None ⇒ continue."""
+    """Log and apply unclean assessment. None ⇒ soft-retry / continue."""
+    logger.warning(
+        "scrape_challenge_detected request_id=%s host=%s strategy=%s "
+        "attempt=%d marker=%s",
+        request_id,
+        urlparse(target_url).hostname,
+        strategy.value,
+        attempts,
+        assessment.detected_marker,
+    )
     if assessment.may_retry_strategies(
         has_more=has_more_strategies,
         remaining_seconds=remaining_work,
@@ -341,11 +348,26 @@ def run_browser_tier(
         remaining_work = remaining_work_seconds(settings, browser_ready_monotonic)
         try:
             navigate(driver, target_url, strategy, step_budget)
-            wait_for_readiness(
+            mid_wait = wait_for_readiness(
                 driver,
                 selector=payload.wait_for_selector,
                 timeout_seconds=min(payload.wait_timeout_seconds, step_budget),
             )
+            if mid_wait is not None:
+                blocked = _surface_unclean(
+                    target_url,
+                    request_id=request_id,
+                    attempts=attempts,
+                    strategy=strategy,
+                    started_monotonic=started_monotonic,
+                    assessment=mid_wait,
+                    has_more_strategies=has_more,
+                    remaining_work=remaining_work,
+                    collector=collector,
+                )
+                if blocked is None:
+                    continue
+                return blocked
 
             if payload.scroll:
                 apply_scrolling(driver)
@@ -355,16 +377,7 @@ def run_browser_tier(
             )
 
             if not assessment.is_clean:
-                logger.warning(
-                    "scrape_challenge_detected request_id=%s host=%s strategy=%s "
-                    "attempt=%d marker=%s",
-                    request_id,
-                    urlparse(target_url).hostname,
-                    strategy.value,
-                    attempt_index,
-                    assessment.detected_marker,
-                )
-                blocked = _unclean_retry_or_block(
+                blocked = _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
@@ -406,9 +419,9 @@ def run_browser_tier(
                 str(exc),
             )
             # Prefer knowable challenge over timeout when the page is inspectable.
-            assessment = _inspect_assessment(driver, target_url)
+            assessment = _inspect_assessment(driver)
             if assessment is not None and not assessment.is_clean:
-                blocked = _unclean_retry_or_block(
+                blocked = _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,

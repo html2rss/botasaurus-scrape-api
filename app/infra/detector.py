@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 
+from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.schemas.response import ChallengeSignal
 
 _CHALLENGE_MARKERS: tuple[str, ...] = (
@@ -28,6 +30,12 @@ _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
 
 # Soft strategy retries need this much remaining work budget (seconds).
 _MIN_SOFT_RETRY_REMAINING_SECONDS = 5
+
+_DRIVER_SIGNAL_METHODS: tuple[tuple[str, str], ...] = (
+    ("is_bot_detected", "botasaurus_driver_bot_detected"),
+    ("is_in_challenge", "botasaurus_driver_challenge"),
+    ("is_blocked", "botasaurus_driver_blocked"),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,20 +82,11 @@ class ChallengeDetector:
 
         # 1. Driver-level anti-bot signal inspection
         if driver is not None:
-            for method_name, marker_label in (
-                ("is_bot_detected", "botasaurus_driver_bot_detected"),
-                ("is_in_challenge", "botasaurus_driver_challenge"),
-                ("is_blocked", "botasaurus_driver_blocked"),
-            ):
-                check_fn = getattr(driver, method_name, None)
-                if callable(check_fn):
-                    try:
-                        if check_fn():
-                            matched_marker = marker_label
-                            break
-                    except Exception:
-                        # Best-effort driver bot detection check
-                        pass
+            typed = cast(DriverProtocol, driver)
+            for method_name, marker_label in _DRIVER_SIGNAL_METHODS:
+                if call_if_available(typed, method_name, default=False):
+                    matched_marker = marker_label
+                    break
 
         # 2. HTML text markers (only inspect if driver check did not match)
         if matched_marker is None and html:

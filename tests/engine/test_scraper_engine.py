@@ -172,8 +172,39 @@ class ScraperEngineUnitTests(unittest.TestCase):
     def test_wait_for_readiness_uses_sleep_random_when_available(self):
         mock_driver = MagicMock()
         mock_driver.sleep_random = MagicMock()
-        wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
+        mock_driver.page_html = "<html><body>ok</body></html>"
+        mock_driver.is_bot_detected.return_value = False
+        mock_driver.is_in_challenge.return_value = False
+        mock_driver.is_blocked.return_value = False
+        result = wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
         mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
+        self.assertIsNone(result)
+
+    def test_wait_for_readiness_chunks_selector_and_surfaces_challenge(self):
+        from typing import cast
+
+        from app.engine.driver_capabilities import DriverProtocol
+        from app.engine.strategies import wait_for_readiness as readiness
+
+        class _ChunkDriver(FakeDriver):
+            wait_calls = 0
+
+            def wait_for_element(self, *_args: object, **_kwargs: Any) -> None:
+                type(self).wait_calls += 1
+                raise TimeoutError("missing")
+
+            def __init__(self, *args: object, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.page_html = "<html>Just a moment...</html>"
+
+        driver = _ChunkDriver()
+        assessment = readiness(
+            cast(DriverProtocol, driver), selector="#x", timeout_seconds=6
+        )
+        self.assertIsNotNone(assessment)
+        assert assessment is not None
+        self.assertFalse(assessment.is_clean)
+        self.assertEqual(_ChunkDriver.wait_calls, 1)
 
     def test_execute_honors_submission_deadline_after_queue_wait(self):
         settings = get_settings()
