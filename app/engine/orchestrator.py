@@ -61,14 +61,13 @@ class ScraperEngine:
             self._active_request_ids.discard(request_id)
 
     def prune_runtime_dirs(self) -> int:
-        # Hold the lock for the full prune so a newly registered request cannot
-        # create its runtime dir and then be deleted from a stale snapshot.
-        protected: set[Path]
-        if self.warm_pool is not None:
-            protected = self.warm_pool.live_spare_dirs()
-        else:
-            protected = set()
+        # Active request ids and spare dirs are snapshotted atomically for prune.
         with self._active_request_ids_lock:
+            protected: set[Path] = (
+                self.warm_pool.live_spare_dirs()
+                if self.warm_pool is not None
+                else set()
+            )
             return prune_orphan_runtime_dirs(
                 self.runtime_root,
                 set(self._active_request_ids),

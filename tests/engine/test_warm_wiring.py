@@ -33,6 +33,9 @@ class WarmWiringTests(unittest.TestCase):
         self.runtime_root = Path(self.tmp.name)
         self.built_via_pool: list[TrackingDriver] = []
         self.spare_ready = threading.Event()
+        self.factory_started = threading.Event()
+        self.factory_release = threading.Event()
+        self.factory_release.set()
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -41,6 +44,8 @@ class WarmWiringTests(unittest.TestCase):
         self, fingerprint: DriverFingerprint, spare_dir: Path
     ) -> TrackingDriver:
         del fingerprint, spare_dir
+        self.factory_started.set()
+        self.factory_release.wait(timeout=5)
         driver = TrackingDriver()
         self.built_via_pool.append(driver)
         self.spare_ready.set()
@@ -249,6 +254,29 @@ class WarmWiringTests(unittest.TestCase):
         driver.close()
         shutil.rmtree(spare_dir, ignore_errors=True)
         pool.release_adopted(spare_dir)
+        pool.shutdown()
+
+    def test_prune_protects_building_spare_dir(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        self.factory_release.clear()
+        self.factory_started.clear()
+        pool.notify_scrape_finished(fp)
+        self.assertTrue(self.factory_started.wait(timeout=2))
+        protected = pool.live_spare_dirs()
+        self.assertEqual(len(protected), 1)
+        building_dir = next(iter(protected))
+        self.assertTrue(building_dir.name.startswith("spare-"))
+
+        removed = engine.prune_runtime_dirs()
+        self.assertEqual(removed, 0)
+        self.assertTrue(building_dir.is_dir())
+
+        self.factory_release.set()
+        self._wait_spare(pool)
         pool.shutdown()
 
     def test_prewarm_false_leaves_warm_pool_none(self) -> None:

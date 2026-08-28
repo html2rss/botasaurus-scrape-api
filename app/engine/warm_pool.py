@@ -3,6 +3,10 @@
 Owns spare lifecycle: build, health, TTL, one-shot handoff, refill daemon,
 and shutdown. Request-path code only calls ``take`` / ``release_adopted`` /
 ``notify_scrape_finished``.
+
+Spares are constructed idle at refill time; per-request cookies, headers,
+and tracker blocking are applied in ``configure_driver()`` after adoption,
+not during spare build.
 """
 
 from __future__ import annotations
@@ -240,14 +244,15 @@ class WarmDriverPool:
             self._spare = None
             self._adopted_dirs.add(spare.spare_dir)
 
-        if self._health_check(spare.driver) is None:
+        if (
+            self._probe_health(
+                spare.driver,
+                fingerprint_hash=spare.fingerprint.fingerprint_hash[:12],
+            )
+            is None
+        ):
             with self._lock:
-                self._adopted_dirs.discard(spare.spare_dir)
-                logger.info(
-                    "warm_pool_reap reason=unhealthy fingerprint_hash=%s",
-                    spare.fingerprint.fingerprint_hash[:12],
-                )
-                self._close_spare_unlocked(spare, reason="unhealthy")
+                self._abort_adopted_take(spare, reason="unhealthy")
             return None
 
         age_s = self._clock() - spare.created_at
@@ -432,6 +437,29 @@ class WarmDriverPool:
             with self._lock:
                 self._building = False
                 self._building_dir = None
+
+    def _probe_health(
+        self, driver: DriverProtocol, *, fingerprint_hash: str
+    ) -> CdpTabProtocol | None:
+        try:
+            return self._health_check(driver)
+        except Exception as exc:
+            logger.warning(
+                "warm_pool_health_probe_failed fingerprint_hash=%s error=%s",
+                fingerprint_hash,
+                type(exc).__name__,
+            )
+            return None
+
+    def _abort_adopted_take(self, spare: _SpareSlot, *, reason: str) -> None:
+        """Requires ``_lock`` held. Single path for failed health probes."""
+        self._adopted_dirs.discard(spare.spare_dir)
+        logger.info(
+            "warm_pool_reap reason=%s fingerprint_hash=%s",
+            reason,
+            spare.fingerprint.fingerprint_hash[:12],
+        )
+        self._close_spare_unlocked(spare, reason=reason)
 
     def _close_spare_unlocked(self, spare: _SpareSlot, *, reason: str) -> None:
         del reason

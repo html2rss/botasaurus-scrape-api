@@ -155,6 +155,18 @@ class WarmPoolTests(unittest.TestCase):
         self.assertEqual(pool.live_spare_dirs(), set())
         pool.shutdown()
 
+    def test_health_probe_exception_reaps_adopted_spare(self) -> None:
+        pool = self._pool(
+            health_check=HealthCheckStub(raises=RuntimeError("cdp probe failed"))
+        )
+        fp = _fp()
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        self.assertIsNone(pool.take(fp))
+        self.assertTrue(self.built[0].closed)
+        self.assertEqual(pool.live_spare_dirs(), set())
+        pool.shutdown()
+
     def test_idle_ttl_reaps_spare(self) -> None:
         closed = threading.Event()
 
