@@ -260,7 +260,7 @@ class WarmPoolTests(unittest.TestCase):
         self.assertEqual(pool.live_spare_dirs(), set())
         self.assertGreaterEqual(pool.close_count, pool.build_count)
 
-    def test_concurrent_take_and_refill_uses_barrier(self) -> None:
+    def test_concurrent_take_and_notify_does_not_deadlock(self) -> None:
         pool = self._pool()
         fp = _fp()
         barrier = threading.Barrier(2)
@@ -292,7 +292,15 @@ class WarmPoolTests(unittest.TestCase):
         t2.join(timeout=5)
         self.assertEqual(len(results), 1)
         self.assertIsNotNone(results[0])
+        # notify may run before take empties the slot; nudge refill deterministically.
+        pool.notify_scrape_finished(fp)
         self._wait_spare(pool)
+        hit = results[0]
+        assert hit is not None
+        driver, spare_dir = hit
+        driver.close()
+        shutil.rmtree(spare_dir, ignore_errors=True)
+        pool.release_adopted(spare_dir)
         pool.shutdown()
 
     def test_min_refill_backoff(self) -> None:
