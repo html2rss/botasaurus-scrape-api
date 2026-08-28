@@ -23,7 +23,7 @@ from app.engine.warm_pool import (
 from app.infra.runtime_cleanup import prune_orphan_runtime_dirs
 from app.schemas.response import ScrapeError, ScrapeSuccess
 from tests.support.factories import scrape_request
-from tests.support.fakes import HealthCheckStub, TrackingDriver
+from tests.support.fakes import HealthCheckStub, InstrumentedDriver, TrackingDriver
 
 
 class WarmWiringTests(unittest.TestCase):
@@ -42,11 +42,11 @@ class WarmWiringTests(unittest.TestCase):
 
     def _factory(
         self, fingerprint: DriverFingerprint, spare_dir: Path
-    ) -> TrackingDriver:
+    ) -> InstrumentedDriver:
         del fingerprint, spare_dir
         self.factory_started.set()
         self.factory_release.wait(timeout=5)
-        driver = TrackingDriver()
+        driver = InstrumentedDriver()
         self.built_via_pool.append(driver)
         self.spare_ready.set()
         return driver
@@ -103,6 +103,56 @@ class WarmWiringTests(unittest.TestCase):
         self.assertIsInstance(result, ScrapeSuccess)
         self.assertEqual(cold_builds, 0)
         self.assertEqual(len(self.built_via_pool), 1)
+        pool.shutdown()
+
+    def test_warm_hit_applies_request_cookies_and_headers(self) -> None:
+        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
+        pool = self._attach_pool(engine)
+        payload_a = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+            cookies={"a": "1"},
+            headers={"X-Test": "first"},
+        )
+        with patch("botasaurus.browser.Driver", InstrumentedDriver):
+            result_a = engine.execute(payload_a, request_id="req-a")
+
+        self.assertIsInstance(result_a, ScrapeSuccess)
+        self._wait_spare(pool)
+
+        payload_b = scrape_request(
+            execution_mode="browser",
+            navigation_mode="get",
+            max_retries=0,
+            headless=True,
+            cookies={"b": "2"},
+            headers={"X-Test": "second"},
+        )
+        cold_builds = 0
+
+        def counting_instrumented(
+            *args: object, **kwargs: object
+        ) -> InstrumentedDriver:
+            nonlocal cold_builds
+            cold_builds += 1
+            return InstrumentedDriver(*args, **kwargs)
+
+        with patch("botasaurus.browser.Driver", counting_instrumented):
+            result_b = engine.execute(payload_b, request_id="req-b")
+
+        self.assertIsInstance(result_b, ScrapeSuccess)
+        self.assertEqual(cold_builds, 0)
+
+        warm_driver = self.built_via_pool[0]
+        self.assertEqual(len(warm_driver.state.cookies), 1)
+        cookie_batch = warm_driver.state.cookies[0]
+        self.assertEqual(len(cookie_batch), 1)
+        self.assertEqual(cookie_batch[0]["name"], "b")
+        self.assertEqual(cookie_batch[0]["value"], "2")
+        self.assertEqual(len(warm_driver.state.headers), 1)
+        self.assertEqual(warm_driver.state.headers[0]["X-Test"], "second")
         pool.shutdown()
 
     def test_warm_miss_uses_cold_driver(self) -> None:

@@ -115,6 +115,14 @@ class WarmPoolTests(unittest.TestCase):
         self.assertNotIn("From-Header", repr(fp))
         self.assertIn("hash=", repr(fp))
 
+    def test_refill_builds_idle_spare(self) -> None:
+        pool = self._pool()
+        fp = _fp()
+        pool.notify_scrape_finished(fp)
+        self._wait_spare(pool)
+        self.assertEqual(self.built[0].state.navigation, [])
+        pool.shutdown()
+
     def test_take_hit_miss_and_one_shot(self) -> None:
         pool = self._pool()
         fp = _fp()

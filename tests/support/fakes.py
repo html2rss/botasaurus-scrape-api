@@ -89,7 +89,9 @@ class DriverConfigureState:
     cookies: list[list[dict[str, str]]] = field(
         default_factory=lambda: list[list[dict[str, str]]]()
     )
-    headers: list[dict[str, str]] = field(default_factory=lambda: list[dict[str, str]]())
+    headers: list[dict[str, str]] = field(
+        default_factory=lambda: list[dict[str, str]]()
+    )
     navigation: list[str] = field(default_factory=lambda: list[str]())
 
 
