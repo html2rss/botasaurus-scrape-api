@@ -153,6 +153,23 @@ class WarmPoolTests(unittest.TestCase):
         self.assertTrue(pool.live_spare_dirs())
         pool.shutdown()
 
+    def test_stale_spare_reaped_when_desired_fingerprint_changes(self) -> None:
+        pool = self._pool(idle_ttl_seconds=0)
+        fp_a = _fp(user_agent="A")
+        fp_b = _fp(user_agent="B")
+        pool.notify_scrape_finished(fp_a)
+        self._wait_spare(pool)
+        stale_driver = self.built[0]
+        self.spare_ready.clear()
+
+        pool.notify_scrape_finished(fp_b)
+        self._wait_spare(pool)
+
+        self.assertTrue(stale_driver.closed)
+        self.assertEqual(len(self.built), 2)
+        self.assertIsNotNone(pool.take(fp_b))
+        pool.shutdown()
+
     def test_unhealthy_spare_is_reaped_not_handed_out(self) -> None:
         pool = self._pool(health_check=HealthCheckStub(healthy=False))
         fp = _fp()

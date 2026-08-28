@@ -367,14 +367,29 @@ class WarmDriverPool:
     def _schedule_deferred_refill(self, not_before: float) -> None:
         self._next_refill_at = not_before
 
+    def _maybe_reap_stale_spare(self, desired: DriverFingerprint) -> None:
+        """Requires ``_lock`` held. Drop ready spare when it no longer matches desired."""
+        spare = self._spare
+        if spare is None or spare.fingerprint == desired:
+            return
+        logger.info(
+            "warm_pool_reap reason=stale_fingerprint fingerprint_hash=%s",
+            spare.fingerprint.fingerprint_hash[:12],
+        )
+        self._close_spare_unlocked(spare, reason="stale_fingerprint")
+        self._spare = None
+
     def _maybe_refill(self) -> None:
         with self._lock:
             if self._stop.is_set():
                 return
-            if self._spare is not None or self._building:
+            if self._building:
                 return
             desired = self._desired
             if desired is None:
+                return
+            self._maybe_reap_stale_spare(desired)
+            if self._spare is not None:
                 return
             if self._headless_only and not desired.headless:
                 return
