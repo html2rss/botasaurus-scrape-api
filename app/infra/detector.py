@@ -37,6 +37,10 @@ class ChallengeAssessment:
     def is_clean(self) -> bool:
         return not self.blocked_detected and not self.challenge_detected
 
+    def may_retry_strategies(self, *, has_more: bool) -> bool:
+        """Soft challenge markers may retry strategies; hard HTTP blocks do not."""
+        return self.challenge_detected and has_more
+
     def to_signal(self) -> ChallengeSignal:
         """Convert domain assessment to wire ChallengeSignal DTO."""
         return ChallengeSignal(

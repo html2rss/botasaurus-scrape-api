@@ -30,7 +30,7 @@ from app.infra.metadata import MetadataExtractor, MetadataResult
 from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
-from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
+from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess, XhrResponse
 
@@ -66,16 +66,89 @@ def settle_page_state(
     return html, meta, assessment, xhr_responses
 
 
+def _inspect_assessment(
+    driver: DriverProtocol, _target_url: str
+) -> ChallengeAssessment | None:
+    """Best-effort challenge assessment after a nav/timeout exception.
+
+    Lean path only: html + passive request status + driver signals via
+    ChallengeDetector. Skips CDP log walks that can stall on a hung page.
+    Metadata failures must not discard HTML/driver challenge signals.
+    """
+    try:
+        html = driver.page_html or ""
+    except Exception:
+        return None
+    try:
+        status_code, _, _ = MetadataExtractor.extract_from_requests(driver)
+    except Exception:
+        status_code = None
+    try:
+        return ChallengeDetector.detect(html, status_code, driver=driver)
+    except Exception:
+        return None
+
+
+def _challenge_block_error(
+    target_url: str,
+    *,
+    request_id: str,
+    attempts: int,
+    strategy: NavigationMode | None,
+    render_ms: int,
+    assessment: ChallengeAssessment,
+) -> ScrapeError:
+    marker = assessment.detected_marker or "unknown"
+    return build_error(
+        target_url,
+        f"Bot challenge detected ({marker})",
+        request_id=request_id,
+        error_category=ErrorCategory.CHALLENGE_BLOCK,
+        attempts=attempts,
+        strategy_used=strategy,
+        render_ms=render_ms,
+        execution_tier=ExecutionTier.BROWSER_DRIVER,
+        assessment=assessment,
+        timeout_phase=None,
+    )
+
+
+def _unclean_retry_or_block(
+    target_url: str,
+    *,
+    request_id: str,
+    attempts: int,
+    strategy: NavigationMode,
+    started_monotonic: float,
+    assessment: ChallengeAssessment,
+    has_more_strategies: bool,
+    collector: XhrCollector,
+) -> ScrapeError | None:
+    """Retry soft challenges; otherwise return challenge_block. None ⇒ continue."""
+    if assessment.may_retry_strategies(has_more=has_more_strategies):
+        collector.reset()
+        return None
+    return _challenge_block_error(
+        target_url,
+        request_id=request_id,
+        attempts=attempts,
+        strategy=strategy,
+        render_ms=elapsed_ms(started_monotonic),
+        assessment=assessment,
+    )
+
+
 def _boot_storage_error(
     target_url: str,
     request_id: str,
     started_monotonic: float,
     exc: OSError,
 ) -> ScrapeError:
-    if exc.errno == errno.ENOSPC:
-        detail = "Scrape runtime storage full"
-    else:
-        detail = "Scrape runtime storage unavailable"
+    detail = (
+        "Scrape runtime storage full"
+        if exc.errno == errno.ENOSPC
+        else "Scrape runtime storage unavailable"
+    )
     return build_error(
         target_url,
         f"{detail}: {exc}",
@@ -85,6 +158,32 @@ def _boot_storage_error(
         error_category=ErrorCategory.NAVIGATION_ERROR,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
         timeout_phase=TimeoutPhase.BOOT,
+    )
+
+
+def _tier_exception_error(
+    target_url: str,
+    *,
+    request_id: str,
+    attempts: int,
+    strategy: NavigationMode | None,
+    started_monotonic: float,
+    exc: Exception,
+    timeout_phase: TimeoutPhase | None,
+) -> ScrapeError:
+    is_timeout = is_timeout_exception(exc)
+    return build_error(
+        target_url,
+        str(exc),
+        request_id=request_id,
+        attempts=attempts,
+        strategy_used=strategy,
+        render_ms=elapsed_ms(started_monotonic),
+        error_category=(
+            ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
+        ),
+        execution_tier=ExecutionTier.BROWSER_DRIVER,
+        timeout_phase=timeout_phase,
     )
 
 
@@ -153,19 +252,13 @@ def run_browser_tier(
                 ),
             )
         except Exception as exc:
-            is_timeout = is_timeout_exception(exc)
-            return build_error(
+            return _tier_exception_error(
                 target_url,
-                str(exc),
                 request_id=request_id,
                 attempts=0,
-                render_ms=elapsed_ms(started_monotonic),
-                error_category=(
-                    ErrorCategory.TIMEOUT
-                    if is_timeout
-                    else ErrorCategory.NAVIGATION_ERROR
-                ),
-                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                strategy=None,
+                started_monotonic=started_monotonic,
+                exc=exc,
                 timeout_phase=TimeoutPhase.BOOT,
             )
 
@@ -196,6 +289,7 @@ def run_browser_tier(
 
     for attempt_index, strategy in enumerate(strategies, start=1):
         attempts = attempt_index
+        has_more = attempt_index < len(strategies)
         progress.mark(
             TimeoutPhase.WORK,
             attempts=attempts,
@@ -222,28 +316,27 @@ def run_browser_tier(
 
             if not assessment.is_clean:
                 logger.warning(
-                    "scrape_challenge_detected request_id=%s host=%s strategy=%s attempt=%d marker=%s",
+                    "scrape_challenge_detected request_id=%s host=%s strategy=%s "
+                    "attempt=%d marker=%s",
                     request_id,
                     urlparse(target_url).hostname,
                     strategy.value,
                     attempt_index,
                     assessment.detected_marker,
                 )
-                if attempt_index < len(strategies):
-                    collector.reset()
-                    continue
-
-                return build_error(
+                blocked = _unclean_retry_or_block(
                     target_url,
-                    f"Bot challenge detected ({assessment.detected_marker or 'unknown'})",
                     request_id=request_id,
-                    error_category=ErrorCategory.CHALLENGE_BLOCK,
                     attempts=attempts,
-                    strategy_used=strategy,
-                    render_ms=elapsed_ms(started_monotonic),
-                    execution_tier=ExecutionTier.BROWSER_DRIVER,
+                    strategy=strategy,
+                    started_monotonic=started_monotonic,
                     assessment=assessment,
+                    has_more_strategies=has_more,
+                    collector=collector,
                 )
+                if blocked is None:
+                    continue
+                return blocked
 
             return build_success(
                 target_url,
@@ -262,7 +355,8 @@ def run_browser_tier(
             )
         except Exception as exc:
             logger.warning(
-                "scrape_attempt_failed request_id=%s host=%s mode=%s strategy=%s attempt=%d error=%s",
+                "scrape_attempt_failed request_id=%s host=%s mode=%s strategy=%s "
+                "attempt=%d error=%s",
                 request_id,
                 urlparse(target_url).hostname,
                 payload.navigation_mode,
@@ -270,25 +364,36 @@ def run_browser_tier(
                 attempt_index,
                 str(exc),
             )
-            if attempt_index < len(strategies):
+            # Prefer knowable challenge over timeout when the page is inspectable.
+            assessment = _inspect_assessment(driver, target_url)
+            if assessment is not None and not assessment.is_clean:
+                blocked = _unclean_retry_or_block(
+                    target_url,
+                    request_id=request_id,
+                    attempts=attempts,
+                    strategy=strategy,
+                    started_monotonic=started_monotonic,
+                    assessment=assessment,
+                    has_more_strategies=has_more,
+                    collector=collector,
+                )
+                if blocked is None:
+                    continue
+                return blocked
+            if has_more:
                 collector.reset()
                 continue
 
-            is_timeout = is_timeout_exception(exc)
-            return build_error(
+            return _tier_exception_error(
                 target_url,
-                str(exc),
                 request_id=request_id,
                 attempts=attempts,
-                strategy_used=strategy,
-                render_ms=elapsed_ms(started_monotonic),
-                error_category=(
-                    ErrorCategory.TIMEOUT
-                    if is_timeout
-                    else ErrorCategory.NAVIGATION_ERROR
+                strategy=strategy,
+                started_monotonic=started_monotonic,
+                exc=exc,
+                timeout_phase=(
+                    TimeoutPhase.WORK if is_timeout_exception(exc) else None
                 ),
-                execution_tier=ExecutionTier.BROWSER_DRIVER,
-                timeout_phase=TimeoutPhase.WORK if is_timeout else None,
             )
 
     return build_error(

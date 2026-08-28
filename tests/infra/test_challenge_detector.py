@@ -25,6 +25,16 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertFalse(res.blocked_detected)
         self.assertFalse(res.challenge_detected)
 
+    def test_soft_challenge_may_retry_strategies(self):
+        soft = ChallengeDetector.detect("<html>Just a moment...</html>", 200)
+        self.assertTrue(soft.may_retry_strategies(has_more=True))
+        self.assertFalse(soft.may_retry_strategies(has_more=False))
+
+    def test_hard_block_does_not_retry_strategies(self):
+        hard = ChallengeDetector.detect("<html>Forbidden</html>", 403)
+        self.assertFalse(hard.may_retry_strategies(has_more=True))
+        self.assertFalse(hard.may_retry_strategies(has_more=False))
+
     def test_driver_bot_detection_integration(self):
         mock_driver = MagicMock()
         mock_driver.is_bot_detected.return_value = True
