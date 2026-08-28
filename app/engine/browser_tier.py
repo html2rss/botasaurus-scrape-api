@@ -169,7 +169,7 @@ def _boot_storage_error(
         render_ms=elapsed_ms(started_monotonic),
         error_category=ErrorCategory.NAVIGATION_ERROR,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
-        timeout_phase=TimeoutPhase.BOOT,
+        timeout_phase=None,
     )
 
 

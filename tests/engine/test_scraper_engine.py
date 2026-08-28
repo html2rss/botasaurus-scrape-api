@@ -328,9 +328,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
             assert isinstance(result, ScrapeError)
             self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
             self.assertIn("runtime storage full", result.error)
-            self.assertIsNotNone(result.diagnostics.timeout_phase)
-            assert result.diagnostics.timeout_phase is not None
-            self.assertEqual(result.diagnostics.timeout_phase.value, "boot")
+            self.assertIsNone(result.diagnostics.timeout_phase)
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_prune_orphan_runtime_dirs_before_new_request(self):
