@@ -168,6 +168,9 @@ Multi-worker uvicorn breaks in-process collision detection unless request ids ar
 - Run `make check` before finish (lint, test, typecheck, openapi-verify).
 - When Pydantic models or route response metadata change, run `make openapi` and commit the snapshot with the code change.
 - When API contract, Docker behavior, or error semantics change, also run `make smoke`.
-- `make smoke` must cover build, boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation check, localhost guardrail.
+- `make smoke` (default `SMOKE_PROFILE=all`) covers prewarm **off** and **on**:
+  - `contract-prewarm-off` — build/boot, `/health`, `/scrape` happy path, strategy override, retry path, isolation (httpbingo cookies), localhost SSRF, request-tier, headers, `organic_get`, scroll, Sentry sidecar init.
+  - `prewarm-on-warm-handoff` — `SCRAPE_PREWARM=true`, two browser `example.com` scrapes, assert `scrape_boot warm_hit=False` then refill then `warm_hit=True` (no isolation pair; that stays on the off profile).
+  - CI Checks titles: `Smoke (prewarm=false, cold)` and `Smoke (prewarm=true, warm-handoff)`. One `docker-smoke-image` job warms Buildx GHA cache (`scope=smoke-linux-amd64`); matrix jobs `cache-from` + `SMOKE_SKIP_BUILD=1`.
 - If API contract, Docker behavior, or error semantics changed, update README in same change.
 - Keep commits scoped (infra vs API vs docs).
