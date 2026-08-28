@@ -269,6 +269,17 @@ Status codes:
 - `502`: scrape execution failure/challenge block.
 - `504`: scrape timed out.
 
+### Timeout / challenge triage
+
+| Signal | Ops meaning |
+| :--- | :--- |
+| `timeout_phase=queue` | Capacity/workers — threadpool wait burned the budget |
+| `timeout_phase=boot` | RAM/shm/prewarm canary — browser/driver failed to start in time |
+| `timeout_phase=work` | Slow or hostile target — navigate/wait/scroll exceeded budget |
+| `challenge_block` | Product signal — anti-bot surface (502), not a timeout |
+
+On outer **504**, queued Futures are cancelled (work never starts). In-flight scrapes stop at the next deadline check or step timeout.
+
 ## Runtime Flow And Invariants
 
 `POST /scrape` executes this path:
