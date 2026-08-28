@@ -84,15 +84,23 @@ class FakeDriver:
         return []
 
 
+def _empty_cookie_batches() -> list[list[dict[str, str]]]:
+    return []
+
+
+def _empty_header_batches() -> list[dict[str, str]]:
+    return []
+
+
+def _empty_navigation() -> list[str]:
+    return []
+
+
 @dataclass(slots=True)
 class DriverConfigureState:
-    cookies: list[list[dict[str, str]]] = field(
-        default_factory=lambda: list[list[dict[str, str]]]()
-    )
-    headers: list[dict[str, str]] = field(
-        default_factory=lambda: list[dict[str, str]]()
-    )
-    navigation: list[str] = field(default_factory=lambda: list[str]())
+    cookies: list[list[dict[str, str]]] = field(default_factory=_empty_cookie_batches)
+    headers: list[dict[str, str]] = field(default_factory=_empty_header_batches)
+    navigation: list[str] = field(default_factory=_empty_navigation)
 
 
 class InstrumentedDriverTab(FakeDriverTab):
