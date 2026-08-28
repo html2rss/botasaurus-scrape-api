@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from app.config import Settings
 from app.engine import ScraperEngine
-from app.engine.warm_pool import WarmDriverPool
+from app.engine.warm_pool import DriverFingerprint, WarmDriverPool
 from app.schemas.response import ScrapeSuccess
 from tests.support.factories import scrape_request
 from tests.support.fakes import TrackingDriver
@@ -42,17 +42,25 @@ class PrewarmLifespanTests(unittest.TestCase):
 
     def test_prewarm_true_attaches_pool_and_shuts_down(self) -> None:
         settings = _settings(SCRAPE_PREWARM=True)
-        with patch.object(WarmDriverPool, "shutdown", autospec=True) as mock_shutdown:
-            with test_client(settings=settings) as client:
-                engine = client.app.state.engine
-                assert isinstance(engine, ScraperEngine)
-                pool = engine.warm_pool
-                self.assertIsInstance(pool, WarmDriverPool)
-                assert isinstance(pool, WarmDriverPool)
-                self.assertEqual(pool.ready_spare_dirs(), set())
-                self.assertEqual(pool.live_spare_dirs(), set())
-                # No notify → no Chromium boot during this test.
-            mock_shutdown.assert_called_once_with(pool)
+        with test_client(settings=settings) as client:
+            engine = client.app.state.engine
+            assert isinstance(engine, ScraperEngine)
+            pool = engine.warm_pool
+            self.assertIsInstance(pool, WarmDriverPool)
+            assert isinstance(pool, WarmDriverPool)
+            self.assertEqual(pool.ready_spare_dirs(), set())
+            self.assertEqual(pool.live_spare_dirs(), set())
+            # No notify → no Chromium boot during this test.
+
+        # Real lifespan shutdown: further notifies must not refill.
+        self.assertEqual(pool.live_spare_dirs(), set())
+        self.assertEqual(pool.ready_spare_dirs(), set())
+        fp = DriverFingerprint.from_request(
+            scrape_request(execution_mode="browser", headless=True)
+        )
+        pool.notify_scrape_finished(fp)
+        self.assertEqual(pool.live_spare_dirs(), set())
+        self.assertEqual(pool.ready_spare_dirs(), set())
 
 
 class ParseScrapePrewarmTests(unittest.TestCase):
