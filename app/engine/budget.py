@@ -6,6 +6,10 @@ import time
 
 from app.config import Settings
 
+# AUTO→browser escalate only when at least this many seconds remain on the
+# total scrape clock (Chromium boot is not free).
+MIN_ESCALATE_REMAINING_SECONDS = 8
+
 
 def elapsed_ms(started_monotonic: float) -> int:
     return int((time.monotonic() - started_monotonic) * 1000)
@@ -13,14 +17,14 @@ def elapsed_ms(started_monotonic: float) -> int:
 
 def remaining_total_seconds(settings: Settings, started_monotonic: float) -> int:
     return max(
-        1,
+        0,
         int(settings.scrape_timeout_seconds - (time.monotonic() - started_monotonic)),
     )
 
 
 def remaining_work_seconds(settings: Settings, browser_ready_monotonic: float) -> int:
     return max(
-        1,
+        0,
         int(
             settings.scrape_work_timeout_seconds
             - (time.monotonic() - browser_ready_monotonic)

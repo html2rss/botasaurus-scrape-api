@@ -16,7 +16,6 @@ from app.schemas.enums import (
     ErrorCategory,
     ExecutionTier,
     NavigationMode,
-    TimeoutPhase,
 )
 from app.schemas.response import (
     ScrapeDiagnostics,
@@ -46,12 +45,14 @@ class ScraperEngineUnitTests(unittest.TestCase):
         )
 
         monotonic_values = [
-            1000.0,  # execute started
+            1000.0,  # execute started (orchestrator)
+            1000.0,  # pre-boot remaining_total check
             1000.0,  # boot_started
             1020.0,  # boot_ms end
             1020.0,  # browser ready after boot
-            1020.0,  # remaining total
-            1020.0,  # remaining work
+            1020.0,  # remaining total (step budget)
+            1020.0,  # remaining work (step budget)
+            1020.0,  # remaining work (soft-retry gate)
             1020.0,  # render_ms
         ]
 
@@ -242,7 +243,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertIsInstance(result, ScrapeError)
         assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
-        self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.BOOT)
+        self.assertIsNone(result.diagnostics.timeout_phase)
         self.assertEqual(
             result.diagnostics.execution_tier, ExecutionTier.BROWSER_DRIVER
         )
@@ -425,6 +426,36 @@ class ScraperEngineUnitTests(unittest.TestCase):
                 self.assertEqual(
                     result.headers["content-type"], "text/html; charset=utf-8"
                 )
+
+    def test_request_tier_skip_escalate_returns_challenge_not_timeout(self):
+        from app.engine.budget import MIN_ESCALATE_REMAINING_SECONDS
+        from tests.support.fakes import FakeHttpResponse, FakeRequest
+
+        payload = scrape_request()
+        FakeRequest.response = FakeHttpResponse(
+            text="<html>Just a moment...</html>",
+            status_code=403,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            with (
+                patch("botasaurus.request.Request", FakeRequest),
+                patch(
+                    "app.engine.request_tier.remaining_total_seconds",
+                    side_effect=[30, MIN_ESCALATE_REMAINING_SECONDS - 1],
+                ),
+                patch("botasaurus.browser.Driver") as mock_driver,
+            ):
+                result = engine.execute(payload)
+
+        mock_driver.assert_not_called()
+        self.assertIsInstance(result, ScrapeError)
+        assert isinstance(result, ScrapeError)
+        self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
+        self.assertIsNone(result.diagnostics.timeout_phase)
+        self.assertEqual(result.diagnostics.execution_tier, ExecutionTier.HTTP_REQUEST)
 
     def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
         from tests.support.fakes import FakeHttpResponse, FakeRequest

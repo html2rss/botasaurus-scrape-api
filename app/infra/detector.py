@@ -26,6 +26,9 @@ _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
     (m, m.lower()) for m in _CHALLENGE_MARKERS
 )
 
+# Soft strategy retries need this much remaining work budget (seconds).
+_MIN_SOFT_RETRY_REMAINING_SECONDS = 5
+
 
 @dataclass(frozen=True, slots=True)
 class ChallengeAssessment:
@@ -37,8 +40,15 @@ class ChallengeAssessment:
     def is_clean(self) -> bool:
         return not self.blocked_detected and not self.challenge_detected
 
-    def may_retry_strategies(self, *, has_more: bool) -> bool:
-        """Soft challenge markers may retry strategies; hard HTTP blocks do not."""
+    def may_retry_strategies(
+        self, *, has_more: bool, remaining_seconds: float | int
+    ) -> bool:
+        """Soft challenge markers may retry strategies; hard HTTP blocks do not.
+
+        Requires enough remaining *work* budget so another strategy can finish.
+        """
+        if remaining_seconds < _MIN_SOFT_RETRY_REMAINING_SECONDS:
+            return False
         return self.challenge_detected and has_more
 
     def to_signal(self) -> ChallengeSignal:

@@ -10,8 +10,8 @@ from urllib.parse import urlparse
 
 from app.config import Settings
 from app.engine.browser_tier import run_browser_tier
-from app.engine.budget import elapsed_ms, is_timeout_exception
-from app.engine.envelope import build_error
+from app.engine.budget import elapsed_ms, is_timeout_exception, remaining_total_seconds
+from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error
 from app.engine.request_tier import run_request_tier
 from app.engine.session import ScrapeSession
 from app.engine.warm_pool import DriverFingerprint, WarmDriverPool
@@ -109,7 +109,7 @@ class ScraperEngine:
             progress.mark(TimeoutPhase.QUEUE)
             return build_error(
                 target_url,
-                "Scrape timed out in threadpool queue before execution started",
+                TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.QUEUE],
                 request_id=resolved_request_id,
                 error_category=ErrorCategory.TIMEOUT,
                 timeout_phase=TimeoutPhase.QUEUE,
@@ -153,7 +153,11 @@ class ScraperEngine:
                             warm_fp = session.warm_fingerprint
                             return build_error(
                                 target_url,
-                                str(exc),
+                                (
+                                    TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.WORK]
+                                    if is_timeout
+                                    else str(exc)
+                                ),
                                 request_id=resolved_request_id,
                                 attempts=1,
                                 render_ms=render_ms,
@@ -165,6 +169,23 @@ class ScraperEngine:
                                 execution_tier=ExecutionTier.HTTP_REQUEST,
                                 timeout_phase=TimeoutPhase.WORK if is_timeout else None,
                             )
+
+                if remaining_total_seconds(self.settings, started_monotonic) <= 0:
+                    progress.mark(
+                        TimeoutPhase.BOOT,
+                        execution_tier=ExecutionTier.BROWSER_DRIVER,
+                    )
+                    warm_fp = session.warm_fingerprint
+                    return build_error(
+                        target_url,
+                        TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
+                        request_id=resolved_request_id,
+                        attempts=0,
+                        render_ms=elapsed_ms(started_monotonic),
+                        error_category=ErrorCategory.TIMEOUT,
+                        execution_tier=ExecutionTier.BROWSER_DRIVER,
+                        timeout_phase=TimeoutPhase.BOOT,
+                    )
 
                 result = run_browser_tier(
                     payload,

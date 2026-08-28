@@ -153,3 +153,27 @@ class BrowserTierChallengeTests(unittest.TestCase):
         self.assertEqual(_SoftChallengeDriver.navigate_calls, 3)
         assert result.diagnostics.challenge is not None
         self.assertTrue(result.diagnostics.challenge.detected)
+
+    def test_soft_challenge_does_not_retry_when_work_budget_low(self) -> None:
+        """Below soft-retry floor, unclean assessment is challenge_block immediately."""
+        _SoftChallengeDriver.reset()
+        payload = scrape_request(
+            execution_mode=ExecutionMode.BROWSER,
+            navigation_mode=NavigationMode.AUTO,
+            max_retries=2,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            with (
+                patch("botasaurus.browser.Driver", _SoftChallengeDriver),
+                patch(
+                    "app.engine.browser_tier.remaining_work_seconds",
+                    return_value=4,
+                ),
+            ):
+                result = engine.execute(payload, request_id="req-soft-low-budget")
+        self.assertIsInstance(result, ScrapeError)
+        assert isinstance(result, ScrapeError)
+        self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
+        self.assertEqual(result.diagnostics.attempts, 1)
+        self.assertEqual(_SoftChallengeDriver.navigate_calls, 1)

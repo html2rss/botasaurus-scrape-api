@@ -12,9 +12,10 @@ from app.engine.budget import (
     browser_step_budget_seconds,
     elapsed_ms,
     is_timeout_exception,
+    remaining_work_seconds,
 )
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
-from app.engine.envelope import build_error, build_success
+from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.session import ScrapeSession
 from app.engine.strategies import (
     apply_scrolling,
@@ -122,10 +123,14 @@ def _unclean_retry_or_block(
     started_monotonic: float,
     assessment: ChallengeAssessment,
     has_more_strategies: bool,
+    remaining_work: int,
     collector: XhrCollector,
 ) -> ScrapeError | None:
     """Retry soft challenges; otherwise return challenge_block. None ⇒ continue."""
-    if assessment.may_retry_strategies(has_more=has_more_strategies):
+    if assessment.may_retry_strategies(
+        has_more=has_more_strategies,
+        remaining_seconds=remaining_work,
+    ):
         collector.reset()
         return None
     return _challenge_block_error(
@@ -172,9 +177,14 @@ def _tier_exception_error(
     timeout_phase: TimeoutPhase | None,
 ) -> ScrapeError:
     is_timeout = is_timeout_exception(exc)
+    message = (
+        TIMEOUT_ERROR_BY_PHASE[timeout_phase]
+        if is_timeout and timeout_phase is not None
+        else str(exc)
+    )
     return build_error(
         target_url,
-        str(exc),
+        message,
         request_id=request_id,
         attempts=attempts,
         strategy_used=strategy,
@@ -183,7 +193,28 @@ def _tier_exception_error(
             ErrorCategory.TIMEOUT if is_timeout else ErrorCategory.NAVIGATION_ERROR
         ),
         execution_tier=ExecutionTier.BROWSER_DRIVER,
-        timeout_phase=timeout_phase,
+        timeout_phase=timeout_phase if is_timeout else None,
+    )
+
+
+def _work_budget_timeout(
+    target_url: str,
+    *,
+    request_id: str,
+    attempts: int,
+    strategy: NavigationMode | None,
+    started_monotonic: float,
+) -> ScrapeError:
+    return build_error(
+        target_url,
+        TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.WORK],
+        request_id=request_id,
+        attempts=attempts,
+        strategy_used=strategy,
+        render_ms=elapsed_ms(started_monotonic),
+        error_category=ErrorCategory.TIMEOUT,
+        execution_tier=ExecutionTier.BROWSER_DRIVER,
+        timeout_phase=TimeoutPhase.WORK,
     )
 
 
@@ -296,10 +327,19 @@ def run_browser_tier(
             strategy_used=strategy,
             execution_tier=ExecutionTier.BROWSER_DRIVER,
         )
-        try:
-            step_budget = browser_step_budget_seconds(
-                settings, started_monotonic, browser_ready_monotonic
+        step_budget = browser_step_budget_seconds(
+            settings, started_monotonic, browser_ready_monotonic
+        )
+        if step_budget <= 0:
+            return _work_budget_timeout(
+                target_url,
+                request_id=request_id,
+                attempts=attempts,
+                strategy=strategy,
+                started_monotonic=started_monotonic,
             )
+        remaining_work = remaining_work_seconds(settings, browser_ready_monotonic)
+        try:
             navigate(driver, target_url, strategy, step_budget)
             wait_for_readiness(
                 driver,
@@ -332,6 +372,7 @@ def run_browser_tier(
                     started_monotonic=started_monotonic,
                     assessment=assessment,
                     has_more_strategies=has_more,
+                    remaining_work=remaining_work,
                     collector=collector,
                 )
                 if blocked is None:
@@ -375,6 +416,9 @@ def run_browser_tier(
                     started_monotonic=started_monotonic,
                     assessment=assessment,
                     has_more_strategies=has_more,
+                    remaining_work=remaining_work_seconds(
+                        settings, browser_ready_monotonic
+                    ),
                     collector=collector,
                 )
                 if blocked is None:

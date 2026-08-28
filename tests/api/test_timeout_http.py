@@ -63,7 +63,7 @@ class HandlerTimeoutHttpTests(unittest.TestCase):
         self.assertEqual(body["diagnostics"]["timeout_phase"], "boot")
         self.assertEqual(body["diagnostics"]["attempts"], 0)
         self.assertEqual(body["diagnostics"]["execution_tier"], "browser_driver")
-        self.assertIn("phase=boot", body["error"])
+        self.assertEqual(body["error"], "Browser failed to start in time")
 
 
 if __name__ == "__main__":
