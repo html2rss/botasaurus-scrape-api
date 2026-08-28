@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_engine
+from app.config import Settings
 from app.engine import ScraperEngine
 from app.infra.scrape_progress import ScrapeProgress
 from app.main import create_app
@@ -55,10 +56,11 @@ class _EngineExecuteProxy(ScraperEngine):
 @contextmanager
 def test_client(
     *,
+    settings: Settings | None = None,
     engine: ScraperEngine | None = None,
     execute_side_effect: ExecuteSideEffect | None = None,
 ) -> Iterator[TestClient]:
-    app: FastAPI = create_app()
+    app: FastAPI = create_app(settings)
     bound_engine: ScraperEngine | None = engine
 
     if bound_engine is not None:

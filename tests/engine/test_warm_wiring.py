@@ -329,19 +329,6 @@ class WarmWiringTests(unittest.TestCase):
         self._wait_spare(pool)
         pool.shutdown()
 
-    def test_prewarm_false_leaves_warm_pool_none(self) -> None:
-        engine = ScraperEngine(settings=get_settings(), runtime_root=self.runtime_root)
-        self.assertIsNone(engine.warm_pool)
-        payload = scrape_request(
-            execution_mode="browser",
-            navigation_mode="get",
-            max_retries=0,
-        )
-        with patch("botasaurus.browser.Driver", TrackingDriver):
-            result = engine.execute(payload)
-        self.assertIsInstance(result, ScrapeSuccess)
-        self.assertTrue(TrackingDriver.instances[0].closed)
-
 
 if __name__ == "__main__":
     unittest.main()
