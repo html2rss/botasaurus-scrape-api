@@ -18,17 +18,7 @@ from app.engine.warm_pool import (
 )
 from app.logging_config import get_logger
 from tests.support.factories import scrape_request
-from tests.support.fakes import FakeDriver, FakeDriverTab
-
-
-class TrackingDriver(FakeDriver):
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self.closed = False
-        self.build_thread = threading.current_thread()
-
-    def close(self) -> None:
-        self.closed = True
+from tests.support.fakes import HealthCheckStub, TrackingDriver
 
 
 def _fp(**overrides: object) -> DriverFingerprint:
@@ -76,14 +66,6 @@ class WarmPoolTests(unittest.TestCase):
         self.built.append(driver)
         return driver
 
-    def _health_ok(self, driver: TrackingDriver) -> FakeDriverTab:
-        del driver
-        return FakeDriverTab()
-
-    def _health_dead(self, driver: TrackingDriver) -> None:
-        del driver
-        return None
-
     def _pool(self, **kwargs: object) -> WarmDriverPool:
         original_factory = kwargs.pop("driver_factory", self._factory)
 
@@ -100,7 +82,7 @@ class WarmPoolTests(unittest.TestCase):
             "idle_ttl_seconds": 600,
             "min_refill_seconds": 0,
             "driver_factory": wrapping_factory,
-            "health_check": self._health_ok,
+            "health_check": HealthCheckStub(),
             "memory_pressure": lambda: self.pressure,
             "clock": self._clock,
             "headless_only": False,
@@ -164,7 +146,7 @@ class WarmPoolTests(unittest.TestCase):
         pool.shutdown()
 
     def test_unhealthy_spare_is_reaped_not_handed_out(self) -> None:
-        pool = self._pool(health_check=self._health_dead)
+        pool = self._pool(health_check=HealthCheckStub(healthy=False))
         fp = _fp()
         pool.notify_scrape_finished(fp)
         self._wait_spare(pool)

@@ -8,7 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from typing import ClassVar, cast
+from typing import cast
 from unittest.mock import patch
 
 from app.config import get_settings
@@ -23,26 +23,7 @@ from app.engine.warm_pool import (
 from app.infra.runtime_cleanup import prune_orphan_runtime_dirs
 from app.schemas.response import ScrapeError, ScrapeSuccess
 from tests.support.factories import scrape_request
-from tests.support.fakes import FakeDriver, FakeDriverTab
-
-
-class TrackingDriver(FakeDriver):
-    instances: ClassVar[list[TrackingDriver]] = []
-    closed_count: ClassVar[int] = 0
-
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        super().__init__(*args, **kwargs)
-        self.closed = False
-        type(self).instances.append(self)
-
-    def close(self) -> None:
-        self.closed = True
-        type(self).closed_count += 1
-
-    @classmethod
-    def reset(cls) -> None:
-        cls.instances = []
-        cls.closed_count = 0
+from tests.support.fakes import HealthCheckStub, TrackingDriver
 
 
 class WarmWiringTests(unittest.TestCase):
@@ -65,8 +46,8 @@ class WarmWiringTests(unittest.TestCase):
         self.spare_ready.set()
         return driver
 
-    def _health_ok(self, _driver: object) -> FakeDriverTab:
-        return FakeDriverTab()
+    def _health_ok(self, _driver: object) -> object:
+        return HealthCheckStub()(_driver)  # type: ignore[arg-type]
 
     def _attach_pool(self, engine: ScraperEngine) -> WarmDriverPool:
         pool = WarmDriverPool(

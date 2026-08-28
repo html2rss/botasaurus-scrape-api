@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
-from typing import Any, ClassVar
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, cast
+
+from app.engine.driver_capabilities import CdpTabProtocol, DriverProtocol
 
 
 class FakeMetadataResponse:
@@ -78,6 +82,87 @@ class FakeDriver:
 
     def get_log(self, _log_type: str) -> list[dict[str, str]]:
         return []
+
+
+@dataclass(slots=True)
+class DriverConfigureState:
+    cookies: list[list[dict[str, str]]] = field(
+        default_factory=lambda: list[list[dict[str, str]]]()
+    )
+    headers: list[dict[str, str]] = field(default_factory=lambda: list[dict[str, str]]())
+    navigation: list[str] = field(default_factory=lambda: list[str]())
+
+
+class InstrumentedDriverTab(FakeDriverTab):
+    def __init__(self, state: DriverConfigureState) -> None:
+        self.state = state
+
+    def set_extra_http_headers(self, headers: dict[str, str]) -> None:
+        self.state.headers.append(dict(headers))
+
+
+class TrackingDriver(FakeDriver):
+    instances: ClassVar[list[TrackingDriver]] = []
+    closed_count: ClassVar[int] = 0
+
+    def __init__(self, *args: object, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.state = DriverConfigureState()
+        self._tab = InstrumentedDriverTab(self.state)
+        self.closed = False
+        self.build_thread = threading.current_thread()
+        type(self).instances.append(self)
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.instances = []
+        cls.closed_count = 0
+
+    def close(self) -> None:
+        self.closed = True
+        type(self).closed_count += 1
+
+    def get(self, *_args: object, **_kwargs: Any) -> None:
+        if _args and isinstance(_args[0], str):
+            self.state.navigation.append(f"get:{_args[0]}")
+        return None
+
+    def google_get(self, *_args: object, **_kwargs: Any) -> None:
+        if _args and isinstance(_args[0], str):
+            self.state.navigation.append(f"google_get:{_args[0]}")
+        return None
+
+    def organic_get(self, *_args: object, **_kwargs: Any) -> None:
+        if _args and isinstance(_args[0], str):
+            self.state.navigation.append(f"organic_get:{_args[0]}")
+        return None
+
+
+class InstrumentedDriver(TrackingDriver):
+    def add_cookies(self, cookies: list[dict[str, str]]) -> None:
+        self.state.cookies.append(list(cookies))
+
+
+class HealthCheckStub:
+    """Callable warm-pool health check returning a tab, None, or raising."""
+
+    def __init__(
+        self,
+        *,
+        healthy: bool = True,
+        tab: FakeDriverTab | None = None,
+        raises: BaseException | None = None,
+    ) -> None:
+        self._healthy = healthy
+        self._tab = tab or FakeDriverTab()
+        self._raises = raises
+
+    def __call__(self, _driver: DriverProtocol) -> CdpTabProtocol | None:
+        if self._raises is not None:
+            raise self._raises
+        if not self._healthy:
+            return None
+        return cast(CdpTabProtocol, self._tab)
 
 
 class CaptureDriver(FakeDriver):
