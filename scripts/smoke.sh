@@ -292,7 +292,6 @@ ensure_image() {
 }
 
 start_scrape_container() {
-  local -a env_args=("$@")
   local -a run_args=(
     -d
     --name "${CONTAINER_NAME}"
@@ -301,7 +300,7 @@ start_scrape_container() {
     -p "${HOST_PORT}:${CONTAINER_PORT}"
   )
   local arg
-  for arg in "${env_args[@]}"; do
+  for arg in "$@"; do
     run_args+=(-e "${arg}")
   done
   echo "[smoke] Starting container: ${CONTAINER_NAME}"
