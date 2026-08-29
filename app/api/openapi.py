@@ -95,10 +95,7 @@ scrape error envelope, not FastAPI `detail`.
                 "application/json": {
                     "example": {
                         **SCRAPE_ERROR_EXAMPLE,
-                        "error": (
-                            f"Scrape timed out after {settings.scrape_timeout_seconds} "
-                            "seconds (phase=work)"
-                        ),
+                        "error": "Page navigate/wait exceeded budget",
                         "error_category": "timeout",
                         "diagnostics": {
                             **SCRAPE_ERROR_EXAMPLE["diagnostics"],

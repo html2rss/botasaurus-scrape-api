@@ -29,13 +29,13 @@ class BudgetMathTests(unittest.TestCase):
         self.assertLessEqual(fresh, self.settings.scrape_timeout_seconds)
         self.assertGreaterEqual(fresh, self.settings.scrape_timeout_seconds - 1)
 
-    def test_remaining_total_floors_at_one_when_exhausted(self):
+    def test_remaining_total_returns_zero_when_exhausted(self):
         exhausted = self.now - (self.settings.scrape_timeout_seconds + 60)
-        self.assertEqual(remaining_total_seconds(self.settings, exhausted), 1)
+        self.assertEqual(remaining_total_seconds(self.settings, exhausted), 0)
 
-    def test_remaining_work_floors_at_one_when_exhausted(self):
+    def test_remaining_work_returns_zero_when_exhausted(self):
         exhausted = self.now - (self.settings.scrape_work_timeout_seconds + 60)
-        self.assertEqual(remaining_work_seconds(self.settings, exhausted), 1)
+        self.assertEqual(remaining_work_seconds(self.settings, exhausted), 0)
 
     def test_browser_step_budget_takes_the_tighter_constraint(self):
         # Total budget nearly burnt, work budget fresh: total wins.
@@ -48,10 +48,10 @@ class BudgetMathTests(unittest.TestCase):
         self.assertLessEqual(fresh, self.settings.scrape_work_timeout_seconds)
         self.assertGreaterEqual(fresh, 1)
 
-    def test_browser_step_budget_never_returns_zero_or_negative(self):
+    def test_browser_step_budget_returns_zero_when_past_deadline(self):
         long_ago = self.now - 10_000
         self.assertEqual(
-            browser_step_budget_seconds(self.settings, long_ago, long_ago), 1
+            browser_step_budget_seconds(self.settings, long_ago, long_ago), 0
         )
 
 

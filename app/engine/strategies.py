@@ -12,6 +12,7 @@ from app.engine.driver_capabilities import (
     resolve_callable,
     resolve_cdp_tab,
 )
+from app.infra.detector import ChallengeAssessment, ChallengeDetector
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
 from app.schemas.enums import NavigationMode
@@ -21,6 +22,7 @@ from app.schemas.response import XhrResponse
 logger = get_logger()
 
 _CAPABILITY_MISS = object()
+_READINESS_CHUNK_SECONDS = 2
 
 TRACKER_URL_PATTERNS: list[str] = [
     "*google-analytics.com*",
@@ -111,22 +113,53 @@ def configure_driver(
         )
 
 
+def _mid_wait_challenge(driver: DriverProtocol) -> ChallengeAssessment | None:
+    """Best-effort challenge probe during readiness wait. None if clean or unreadable."""
+    try:
+        html = driver.page_html or ""
+    except Exception:
+        return None
+    assessment = ChallengeDetector.detect(html, driver=driver)
+    if assessment.is_clean:
+        return None
+    return assessment
+
+
 def wait_for_readiness(
     driver: DriverProtocol,
     *,
     selector: str | None,
     timeout_seconds: int,
-) -> None:
-    if selector:
-        driver.wait_for_element(selector, wait=timeout_seconds)
-        return
+) -> ChallengeAssessment | None:
+    """Wait for selector / settle; return unclean assessment if challenge appears mid-wait.
 
-    if (
-        call_if_available(driver, "sleep_random", 0.5, 1.2, default=_CAPABILITY_MISS)
-        is not _CAPABILITY_MISS
-    ):
-        return
-    driver.sleep(1)
+    Selector waits run in ≤2s chunks so a challenge interstitial can fail closed
+    before the full wait budget burns. Non-selector settles stay short and probe once.
+    """
+    if not selector:
+        if (
+            call_if_available(
+                driver, "sleep_random", 0.5, 1.2, default=_CAPABILITY_MISS
+            )
+            is _CAPABILITY_MISS
+        ):
+            driver.sleep(1)
+        return _mid_wait_challenge(driver)
+
+    remaining = max(0, int(timeout_seconds))
+    while remaining > 0:
+        chunk = min(_READINESS_CHUNK_SECONDS, remaining)
+        try:
+            driver.wait_for_element(selector, wait=chunk)
+            return None
+        except Exception:
+            assessment = _mid_wait_challenge(driver)
+            if assessment is not None:
+                return assessment
+            remaining -= chunk
+
+    driver.wait_for_element(selector, wait=0)
+    return None
 
 
 def apply_scrolling(driver: DriverProtocol) -> None:

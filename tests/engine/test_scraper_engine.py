@@ -16,7 +16,6 @@ from app.schemas.enums import (
     ErrorCategory,
     ExecutionTier,
     NavigationMode,
-    TimeoutPhase,
 )
 from app.schemas.response import (
     ScrapeDiagnostics,
@@ -46,12 +45,14 @@ class ScraperEngineUnitTests(unittest.TestCase):
         )
 
         monotonic_values = [
-            1000.0,  # execute started
+            1000.0,  # execute started (orchestrator)
+            1000.0,  # pre-boot remaining_total check
             1000.0,  # boot_started
             1020.0,  # boot_ms end
             1020.0,  # browser ready after boot
-            1020.0,  # remaining total
-            1020.0,  # remaining work
+            1020.0,  # remaining total (step budget)
+            1020.0,  # remaining work (step budget)
+            1020.0,  # remaining work (soft-retry gate)
             1020.0,  # render_ms
         ]
 
@@ -171,8 +172,39 @@ class ScraperEngineUnitTests(unittest.TestCase):
     def test_wait_for_readiness_uses_sleep_random_when_available(self):
         mock_driver = MagicMock()
         mock_driver.sleep_random = MagicMock()
-        wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
+        mock_driver.page_html = "<html><body>ok</body></html>"
+        mock_driver.is_bot_detected.return_value = False
+        mock_driver.is_in_challenge.return_value = False
+        mock_driver.is_blocked.return_value = False
+        result = wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
         mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
+        self.assertIsNone(result)
+
+    def test_wait_for_readiness_chunks_selector_and_surfaces_challenge(self):
+        from typing import cast
+
+        from app.engine.driver_capabilities import DriverProtocol
+        from app.engine.strategies import wait_for_readiness as readiness
+
+        class _ChunkDriver(FakeDriver):
+            wait_calls = 0
+
+            def wait_for_element(self, *_args: object, **_kwargs: Any) -> None:
+                type(self).wait_calls += 1
+                raise TimeoutError("missing")
+
+            def __init__(self, *args: object, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self.page_html = "<html>Just a moment...</html>"
+
+        driver = _ChunkDriver()
+        assessment = readiness(
+            cast(DriverProtocol, driver), selector="#x", timeout_seconds=6
+        )
+        self.assertIsNotNone(assessment)
+        assert assessment is not None
+        self.assertFalse(assessment.is_clean)
+        self.assertEqual(_ChunkDriver.wait_calls, 1)
 
     def test_execute_honors_submission_deadline_after_queue_wait(self):
         settings = get_settings()
@@ -242,7 +274,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertIsInstance(result, ScrapeError)
         assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
-        self.assertEqual(result.diagnostics.timeout_phase, TimeoutPhase.BOOT)
+        self.assertIsNone(result.diagnostics.timeout_phase)
         self.assertEqual(
             result.diagnostics.execution_tier, ExecutionTier.BROWSER_DRIVER
         )
@@ -296,9 +328,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
             assert isinstance(result, ScrapeError)
             self.assertEqual(result.error_category, ErrorCategory.NAVIGATION_ERROR)
             self.assertIn("runtime storage full", result.error)
-            self.assertIsNotNone(result.diagnostics.timeout_phase)
-            assert result.diagnostics.timeout_phase is not None
-            self.assertEqual(result.diagnostics.timeout_phase.value, "boot")
+            self.assertIsNone(result.diagnostics.timeout_phase)
             self.assertEqual(list(runtime_root.iterdir()), [])
 
     def test_prune_orphan_runtime_dirs_before_new_request(self):
@@ -425,6 +455,36 @@ class ScraperEngineUnitTests(unittest.TestCase):
                 self.assertEqual(
                     result.headers["content-type"], "text/html; charset=utf-8"
                 )
+
+    def test_request_tier_skip_escalate_returns_challenge_not_timeout(self):
+        from app.engine.budget import MIN_ESCALATE_REMAINING_SECONDS
+        from tests.support.fakes import FakeHttpResponse, FakeRequest
+
+        payload = scrape_request()
+        FakeRequest.response = FakeHttpResponse(
+            text="<html>Just a moment...</html>",
+            status_code=403,
+            headers={"content-type": "text/html"},
+            url="https://example.com/",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
+            with (
+                patch("botasaurus.request.Request", FakeRequest),
+                patch(
+                    "app.engine.request_tier.remaining_total_seconds",
+                    side_effect=[30, MIN_ESCALATE_REMAINING_SECONDS - 1],
+                ),
+                patch("botasaurus.browser.Driver") as mock_driver,
+            ):
+                result = engine.execute(payload)
+
+        mock_driver.assert_not_called()
+        self.assertIsInstance(result, ScrapeError)
+        assert isinstance(result, ScrapeError)
+        self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
+        self.assertIsNone(result.diagnostics.timeout_phase)
+        self.assertEqual(result.diagnostics.execution_tier, ExecutionTier.HTTP_REQUEST)
 
     def test_html_response_sets_utf8_content_type_and_normalizes_body(self):
         from tests.support.fakes import FakeHttpResponse, FakeRequest

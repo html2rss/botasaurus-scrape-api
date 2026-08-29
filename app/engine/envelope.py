@@ -13,6 +13,12 @@ from app.schemas.response import (
 
 HTML_DOCUMENT_CONTENT_TYPE = "text/html; charset=utf-8"
 
+TIMEOUT_ERROR_BY_PHASE: dict[TimeoutPhase, str] = {
+    TimeoutPhase.QUEUE: "Scraper at capacity; retry shortly",
+    TimeoutPhase.BOOT: "Browser failed to start in time",
+    TimeoutPhase.WORK: "Page navigate/wait exceeded budget",
+}
+
 
 def utf8_normalize_html(html: str) -> str:
     if not html or html.isascii():

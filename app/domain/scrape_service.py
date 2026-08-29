@@ -11,6 +11,7 @@ from functools import partial
 from app.config import Settings
 from app.engine import ScraperEngine
 from app.engine.budget import elapsed_ms
+from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.request_id import resolve_request_id
@@ -116,14 +117,13 @@ class ScrapeService:
         progress: ScrapeProgress,
         timeout_seconds: int,
     ) -> ScrapeError:
+        del timeout_seconds  # budget length is operational; phase message is the UX
         snap = progress.snapshot()
         phase = snap.phase
         render_ms = elapsed_ms(started_monotonic)
         return ScrapeError(
             url=url,
-            error=(
-                f"Scrape timed out after {timeout_seconds} seconds (phase={phase.value})"
-            ),
+            error=TIMEOUT_ERROR_BY_PHASE[phase],
             error_category=ErrorCategory.TIMEOUT,
             diagnostics=ScrapeDiagnostics(
                 request_id=request_id,
@@ -149,19 +149,24 @@ class ScrapeService:
 
         try:
             loop = asyncio.get_running_loop()
-            result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self.executor,
-                    partial(
-                        self.engine.execute,
-                        payload,
-                        deadline_monotonic,
-                        request_id=request_id,
-                        progress=progress,
-                    ),
+            future = loop.run_in_executor(
+                self.executor,
+                partial(
+                    self.engine.execute,
+                    payload,
+                    deadline_monotonic,
+                    request_id=request_id,
+                    progress=progress,
                 ),
-                timeout=self.settings.scrape_timeout_seconds,
             )
+            try:
+                result = await asyncio.wait_for(
+                    future,
+                    timeout=self.settings.scrape_timeout_seconds,
+                )
+            except TimeoutError:
+                future.cancel()
+                raise
         except RequestIdCollisionError:
             collision_result = ScrapeError(
                 url=target_url,
