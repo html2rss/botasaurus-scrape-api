@@ -1,11 +1,11 @@
-"""HTTP 504 envelope carries progress-derived timeout diagnostics."""
+"""HTTP 504 envelope carries lease-derived timeout diagnostics."""
 
 from __future__ import annotations
 
 import unittest
 from unittest.mock import patch
 
-from app.infra.scrape_progress import ScrapeProgress
+from app.engine.work_lease import WorkLease
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeDiagnostics, ScrapeError
@@ -15,21 +15,19 @@ _URL = "https://example.com"
 
 
 class HandlerTimeoutHttpTests(unittest.TestCase):
-    def test_scrape_handler_timeout_uses_progress(self):
+    def test_scrape_handler_timeout_uses_lease_phase(self) -> None:
         def fake_execute(
             payload: ScrapeRequest,
             deadline_monotonic: float | None = None,
             *,
             request_id: str | None = None,
-            progress: ScrapeProgress | None = None,
+            lease: WorkLease | None = None,
         ) -> ScrapeError:
             del payload, deadline_monotonic, request_id
-            assert progress is not None
-            progress.mark(
-                TimeoutPhase.BOOT, execution_tier=ExecutionTier.BROWSER_DRIVER
-            )
+            assert lease is not None
+            lease.mark(TimeoutPhase.BOOT, execution_tier=ExecutionTier.BROWSER_DRIVER)
             # Sentinel only: the patched wait_for raises TimeoutError, so the
-            # 504 envelope must come from the handler's own timeout path.
+            # 504 envelope must come from the lease timeout path.
             return ScrapeError(
                 url=_URL,
                 error="sentinel-discarded",

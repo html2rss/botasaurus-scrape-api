@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -10,12 +9,10 @@ from functools import partial
 
 from app.config import Settings
 from app.engine import ScraperEngine
-from app.engine.budget import elapsed_ms
-from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE
+from app.engine.work_lease import HostConcurrencyGate, WorkLease
 from app.exceptions import RequestIdCollisionError
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.request_id import resolve_request_id
-from app.infra.scrape_progress import ScrapeProgress
 from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, TimeoutPhase
 from app.schemas.request import ScrapeRequest
@@ -37,7 +34,7 @@ class ScrapeOutcome:
 
 
 class ScrapeService:
-    """Owns request-id resolution, URL guardrails, threadpool execution, status mapping, and telemetry."""
+    """Owns request-id resolution, URL guardrails, WorkLease execution, status mapping."""
 
     def __init__(
         self,
@@ -45,10 +42,12 @@ class ScrapeService:
         settings: Settings,
         engine: ScraperEngine,
         executor: ThreadPoolExecutor,
+        host_gate: HostConcurrencyGate | None = None,
     ) -> None:
         self.settings = settings
         self.engine = engine
         self.executor = executor
+        self.host_gate = host_gate or HostConcurrencyGate(settings.scrape_max_per_host)
 
     async def process(
         self,
@@ -108,33 +107,6 @@ class ScrapeService:
             status_code=validation.status_code,
         )
 
-    @staticmethod
-    def build_timeout_error(
-        url: str,
-        *,
-        request_id: str,
-        started_monotonic: float,
-        progress: ScrapeProgress,
-        timeout_seconds: int,
-    ) -> ScrapeError:
-        del timeout_seconds  # budget length is operational; phase message is the UX
-        snap = progress.snapshot()
-        phase = snap.phase
-        render_ms = elapsed_ms(started_monotonic)
-        return ScrapeError(
-            url=url,
-            error=TIMEOUT_ERROR_BY_PHASE[phase],
-            error_category=ErrorCategory.TIMEOUT,
-            diagnostics=ScrapeDiagnostics(
-                request_id=request_id,
-                attempts=snap.attempts,
-                strategy_used=snap.strategy_used,
-                render_ms=render_ms,
-                execution_tier=snap.execution_tier,
-                timeout_phase=phase,
-            ),
-        )
-
     async def _run(
         self,
         payload: ScrapeRequest,
@@ -142,31 +114,26 @@ class ScrapeService:
         request_id: str,
     ) -> ScrapeOutcome:
         target_url = str(payload.url)
-        host = payload.url.host
+        host = payload.url.host or ""
+        lease = WorkLease(
+            settings=self.settings,
+            executor=self.executor,
+            host_gate=self.host_gate,
+        )
         started_monotonic = time.monotonic()
         deadline_monotonic = started_monotonic + self.settings.scrape_timeout_seconds
-        progress = ScrapeProgress()
 
         try:
-            loop = asyncio.get_running_loop()
-            future = loop.run_in_executor(
-                self.executor,
-                partial(
+            result = await lease.run(
+                host=host,
+                work=partial(
                     self.engine.execute,
                     payload,
                     deadline_monotonic,
                     request_id=request_id,
-                    progress=progress,
+                    lease=lease,
                 ),
             )
-            try:
-                result = await asyncio.wait_for(
-                    future,
-                    timeout=self.settings.scrape_timeout_seconds,
-                )
-            except TimeoutError:
-                future.cancel()
-                raise
         except RequestIdCollisionError:
             collision_result = ScrapeError(
                 url=target_url,
@@ -181,12 +148,10 @@ class ScrapeService:
             emit_terminal_telemetry(collision_result, http_status=502)
             return ScrapeOutcome(body=collision_result, status_code=502)
         except TimeoutError:
-            timeout_result = self.build_timeout_error(
+            timeout_result = lease.timeout_error(
                 target_url,
                 request_id=request_id,
                 started_monotonic=started_monotonic,
-                progress=progress,
-                timeout_seconds=self.settings.scrape_timeout_seconds,
             )
             phase = timeout_result.diagnostics.timeout_phase or TimeoutPhase.QUEUE
             logger.warning(
@@ -200,7 +165,7 @@ class ScrapeService:
             emit_terminal_telemetry(
                 timeout_result,
                 http_status=504,
-                warm_hit=progress.snapshot().warm_hit,
+                warm_hit=lease.snapshot().warm_hit,
             )
             return ScrapeOutcome(body=timeout_result, status_code=504)
 
@@ -209,7 +174,7 @@ class ScrapeService:
             emit_terminal_telemetry(
                 result,
                 http_status=status_code,
-                warm_hit=progress.snapshot().warm_hit,
+                warm_hit=lease.snapshot().warm_hit,
             )
         logger.info(
             "scrape_complete request_id=%s host=%s mode=%s tier=%s attempts=%s status=%d error_category=%s",

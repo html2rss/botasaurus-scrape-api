@@ -1,4 +1,4 @@
-"""ScrapeService cancels queued executor work on outer timeout."""
+"""ScrapeService outer timeout maps lease TimeoutError to 504 envelope."""
 
 from __future__ import annotations
 
@@ -9,13 +9,14 @@ from unittest.mock import MagicMock, patch
 from app.config import get_settings
 from app.domain.scrape_service import ScrapeOutcome, ScrapeService
 from app.engine import ScraperEngine
+from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE
 from app.schemas.enums import ErrorCategory, TimeoutPhase
-from app.schemas.response import ScrapeError
+from app.schemas.response import ScrapeDiagnostics, ScrapeError
 from tests.support.factories import scrape_request
 
 
-class ScrapeServiceCancelTests(unittest.IsolatedAsyncioTestCase):
-    async def test_timeout_cancels_executor_future(self) -> None:
+class ScrapeServiceLeaseTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_returns_lease_timeout_envelope(self) -> None:
         settings = get_settings()
         engine = ScraperEngine(settings=settings)
         service = ScrapeService(
@@ -23,28 +24,39 @@ class ScrapeServiceCancelTests(unittest.IsolatedAsyncioTestCase):
             engine=engine,
             executor=ThreadPoolExecutor(max_workers=1),
         )
-        future = MagicMock()
-        future.cancel = MagicMock(return_value=True)
 
-        async def boom(awaitable: object, timeout: float | None = None) -> None:
-            del awaitable, timeout
+        async def boom_run(*, host: str, work: object) -> None:
+            del host, work
             raise TimeoutError
 
-        with (
-            patch("asyncio.get_running_loop") as mock_loop,
-            patch("asyncio.wait_for", side_effect=boom),
-        ):
-            mock_loop.return_value.run_in_executor = MagicMock(return_value=future)
+        with patch("app.domain.scrape_service.WorkLease") as lease_cls:
+            lease = MagicMock()
+            lease.run = boom_run
+            lease.timeout_error = MagicMock(
+                return_value=ScrapeError(
+                    url="https://example.com",
+                    error=TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.QUEUE],
+                    error_category=ErrorCategory.TIMEOUT,
+                    diagnostics=ScrapeDiagnostics(
+                        request_id="req-timeout",
+                        attempts=0,
+                        timeout_phase=TimeoutPhase.QUEUE,
+                    ),
+                )
+            )
+            lease.snapshot = MagicMock(return_value=MagicMock(warm_hit=None))
+            lease_cls.return_value = lease
+
             outcome = await service.process(scrape_request())
 
-        future.cancel.assert_called_once()
         self.assertIsInstance(outcome, ScrapeOutcome)
         self.assertEqual(outcome.status_code, 504)
         self.assertIsInstance(outcome.body, ScrapeError)
         assert isinstance(outcome.body, ScrapeError)
         self.assertEqual(outcome.body.error_category, ErrorCategory.TIMEOUT)
         self.assertEqual(outcome.body.diagnostics.timeout_phase, TimeoutPhase.QUEUE)
-        self.assertEqual(outcome.body.error, "Scraper at capacity; retry shortly")
+        self.assertEqual(outcome.body.error, TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.QUEUE])
+        lease.timeout_error.assert_called_once()
         service.executor.shutdown(wait=False, cancel_futures=True)
 
 

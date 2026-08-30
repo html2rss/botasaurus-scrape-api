@@ -26,9 +26,9 @@ from app.engine.strategies import (
     wait_for_readiness,
 )
 from app.engine.warm_pool import DriverFingerprint
+from app.engine.work_lease import WorkLease
 from app.infra.detector import ChallengeAssessment, ChallengeDetector
 from app.infra.metadata import MetadataExtractor, MetadataResult
-from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
@@ -229,7 +229,7 @@ def run_browser_tier(
     payload: ScrapeRequest,
     session: ScrapeSession,
     started_monotonic: float,
-    progress: ScrapeProgress,
+    lease: WorkLease,
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError:
@@ -237,7 +237,7 @@ def run_browser_tier(
 
     target_url = str(payload.url)
     request_id = session.request_id
-    progress.mark(
+    lease.mark(
         TimeoutPhase.BOOT,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
@@ -303,7 +303,7 @@ def run_browser_tier(
         session.driver = driver
 
     session.warm_hit = warm_hit
-    progress.set_warm_hit(warm_hit)
+    lease.set_warm_hit(warm_hit)
     boot_ms = int((time.monotonic() - boot_started) * 1000)
     logger.info(
         "scrape_boot request_id=%s warm_hit=%s boot_ms=%d",
@@ -320,7 +320,7 @@ def run_browser_tier(
 
     configure_driver(driver, payload, target_url, collector=collector)
     browser_ready_monotonic = time.monotonic()
-    progress.mark(
+    lease.mark(
         TimeoutPhase.WORK,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
@@ -328,7 +328,7 @@ def run_browser_tier(
     for attempt_index, strategy in enumerate(strategies, start=1):
         attempts = attempt_index
         has_more = attempt_index < len(strategies)
-        progress.mark(
+        lease.mark(
             TimeoutPhase.WORK,
             attempts=attempts,
             strategy_used=strategy,

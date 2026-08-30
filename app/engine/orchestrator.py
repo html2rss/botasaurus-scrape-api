@@ -15,12 +15,12 @@ from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error
 from app.engine.request_tier import run_request_tier
 from app.engine.session import ScrapeSession
 from app.engine.warm_pool import DriverFingerprint, WarmDriverPool
+from app.engine.work_lease import WorkLease
 from app.exceptions import RequestIdCollisionError
 from app.infra.runtime_cleanup import (
     prune_orphan_runtime_dirs,
     runtime_root_low_on_space,
 )
-from app.infra.scrape_progress import ScrapeProgress
 from app.logging_config import get_logger
 from app.schemas.enums import (
     ErrorCategory,
@@ -89,7 +89,7 @@ class ScraperEngine:
         deadline_monotonic: float | None = None,
         *,
         request_id: str | None = None,
-        progress: ScrapeProgress | None = None,
+        lease: WorkLease | None = None,
     ) -> ScrapeSuccess | ScrapeError:
         target_url = str(payload.url)
         resolved_request_id = request_id or str(uuid.uuid4())
@@ -103,10 +103,10 @@ class ScraperEngine:
             )
         else:
             started_monotonic = now
-        progress = progress or ScrapeProgress()
+        lease = lease or WorkLease.tracking_only(self.settings)
 
         if deadline_monotonic is not None and now >= deadline_monotonic:
-            progress.mark(TimeoutPhase.QUEUE)
+            lease.mark(TimeoutPhase.QUEUE)
             return build_error(
                 target_url,
                 TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.QUEUE],
@@ -117,7 +117,7 @@ class ScraperEngine:
 
         warm_fp: DriverFingerprint | None = None
         try:
-            with ScrapeSession(self, resolved_request_id) as session:
+            with ScrapeSession(self, resolved_request_id, lease=lease) as session:
                 should_try_request_tier = (
                     payload.execution_mode == ExecutionMode.REQUEST
                     or (
@@ -134,7 +134,7 @@ class ScraperEngine:
                             payload,
                             resolved_request_id,
                             started_monotonic,
-                            progress,
+                            lease,
                             settings=self.settings,
                         )
                         if request_result is not None:
@@ -171,7 +171,7 @@ class ScraperEngine:
                             )
 
                 if remaining_total_seconds(self.settings, started_monotonic) <= 0:
-                    progress.mark(
+                    lease.mark(
                         TimeoutPhase.BOOT,
                         execution_tier=ExecutionTier.BROWSER_DRIVER,
                     )
@@ -191,7 +191,7 @@ class ScraperEngine:
                     payload,
                     session,
                     started_monotonic,
-                    progress,
+                    lease,
                     settings=self.settings,
                 )
                 warm_fp = session.warm_fingerprint

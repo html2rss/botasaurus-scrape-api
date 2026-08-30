@@ -222,7 +222,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
             _payload: object,
             _session: object,
             started_monotonic: float,
-            _progress: object,
+            _lease: object,
             *,
             settings: object,
         ) -> ScrapeSuccess:

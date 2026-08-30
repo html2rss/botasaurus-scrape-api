@@ -61,6 +61,9 @@ class Settings(BaseSettings):
         default=30, validation_alias="SCRAPE_WORK_TIMEOUT_SECONDS"
     )
     scrape_max_workers: int = Field(default=4, validation_alias="SCRAPE_MAX_WORKERS")
+    scrape_max_per_host: int = Field(
+        default=2, ge=1, validation_alias="SCRAPE_MAX_PER_HOST"
+    )
     scrape_runtime_min_free_bytes: int = Field(
         default=256 * 1024 * 1024,
         validation_alias="SCRAPE_RUNTIME_MIN_FREE_BYTES",

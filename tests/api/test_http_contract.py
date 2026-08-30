@@ -5,7 +5,7 @@ from app.config import get_settings
 from app.engine import (
     ScraperEngine,
 )
-from app.infra.scrape_progress import ScrapeProgress
+from app.engine.work_lease import WorkLease
 from app.schemas.enums import (
     ExecutionTier,
 )
@@ -23,9 +23,9 @@ class RequestIdContractTests(unittest.TestCase):
             deadline_monotonic: float | None = None,
             *,
             request_id: str | None = None,
-            progress: ScrapeProgress | None = None,
+            lease: WorkLease | None = None,
         ) -> ScrapeSuccess:
-            del deadline_monotonic, progress
+            del deadline_monotonic, lease
             resolved_request_id = request_id or "req-unknown"
             return ScrapeSuccess(
                 url=str(payload.url),
@@ -212,9 +212,9 @@ class SchemaValidationHttpTests(unittest.TestCase):
             deadline_monotonic: float | None = None,
             *,
             request_id: str | None = None,
-            progress: ScrapeProgress | None = None,
+            lease: WorkLease | None = None,
         ) -> ScrapeSuccess:
-            del deadline_monotonic, request_id, progress
+            del deadline_monotonic, request_id, lease
             captured["wait"] = payload.wait_timeout_seconds
             return ScrapeSuccess(
                 url=str(payload.url),
