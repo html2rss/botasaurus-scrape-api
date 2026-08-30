@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from app.api.deps import get_engine
 from app.config import Settings
 from app.engine import ScraperEngine
-from app.infra.scrape_progress import ScrapeProgress
+from app.engine.work_lease import WorkLease
 from app.main import create_app
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess
@@ -23,7 +23,7 @@ class ExecuteSideEffect(Protocol):
         deadline_monotonic: float | None = ...,
         *,
         request_id: str | None = ...,
-        progress: ScrapeProgress | None = ...,
+        lease: WorkLease | None = ...,
     ) -> ScrapeSuccess | ScrapeError: ...
 
 
@@ -43,13 +43,13 @@ class _EngineExecuteProxy(ScraperEngine):
         deadline_monotonic: float | None = None,
         *,
         request_id: str | None = None,
-        progress: ScrapeProgress | None = None,
+        lease: WorkLease | None = None,
     ) -> ScrapeSuccess | ScrapeError:
         return self._execute_fn(
             payload,
             deadline_monotonic,
             request_id=request_id,
-            progress=progress,
+            lease=lease,
         )
 
 

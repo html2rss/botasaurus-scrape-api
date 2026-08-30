@@ -12,7 +12,6 @@ from app.engine.budget import (
     browser_step_budget_seconds,
     elapsed_ms,
     is_timeout_exception,
-    remaining_work_seconds,
 )
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
@@ -26,9 +25,13 @@ from app.engine.strategies import (
     wait_for_readiness,
 )
 from app.engine.warm_pool import DriverFingerprint
-from app.infra.detector import ChallengeAssessment, ChallengeDetector
+from app.engine.work_lease import WorkLease
+from app.infra.detector import (
+    UNREADABLE_SURFACE,
+    ChallengeAssessment,
+    ChallengeDetector,
+)
 from app.infra.metadata import MetadataExtractor, MetadataResult
-from app.infra.scrape_progress import ScrapeProgress
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
@@ -120,11 +123,8 @@ def _surface_unclean(
     strategy: NavigationMode,
     started_monotonic: float,
     assessment: ChallengeAssessment,
-    has_more_strategies: bool,
-    remaining_work: int,
-    collector: XhrCollector,
-) -> ScrapeError | None:
-    """Log and apply unclean assessment. None ⇒ soft-retry / continue."""
+) -> ScrapeError:
+    """Fail closed: any unclean assessment is challenge_block (no soft-retry)."""
     logger.warning(
         "scrape_challenge_detected request_id=%s host=%s strategy=%s "
         "attempt=%d marker=%s",
@@ -134,12 +134,6 @@ def _surface_unclean(
         attempts,
         assessment.detected_marker,
     )
-    if assessment.may_retry_strategies(
-        has_more=has_more_strategies,
-        remaining_seconds=remaining_work,
-    ):
-        collector.reset()
-        return None
     return _challenge_block_error(
         target_url,
         request_id=request_id,
@@ -229,7 +223,7 @@ def run_browser_tier(
     payload: ScrapeRequest,
     session: ScrapeSession,
     started_monotonic: float,
-    progress: ScrapeProgress,
+    lease: WorkLease,
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError:
@@ -237,10 +231,21 @@ def run_browser_tier(
 
     target_url = str(payload.url)
     request_id = session.request_id
-    progress.mark(
+    lease.mark(
         TimeoutPhase.BOOT,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
+    if lease.aborted:
+        return build_error(
+            target_url,
+            TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
+            request_id=request_id,
+            error_category=ErrorCategory.TIMEOUT,
+            attempts=0,
+            render_ms=elapsed_ms(started_monotonic),
+            execution_tier=ExecutionTier.BROWSER_DRIVER,
+            timeout_phase=TimeoutPhase.BOOT,
+        )
     fingerprint = DriverFingerprint.from_request(payload)
     session.warm_fingerprint = fingerprint
     warm_hit = False
@@ -264,6 +269,18 @@ def run_browser_tier(
             session.prepare_profile_dirs()
         except OSError as exc:
             return _boot_storage_error(target_url, request_id, started_monotonic, exc)
+
+        if lease.aborted:
+            return build_error(
+                target_url,
+                TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
+                request_id=request_id,
+                error_category=ErrorCategory.TIMEOUT,
+                attempts=0,
+                render_ms=elapsed_ms(started_monotonic),
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                timeout_phase=TimeoutPhase.BOOT,
+            )
 
         driver_window_size = (
             [payload.window_size.width, payload.window_size.height]
@@ -303,7 +320,7 @@ def run_browser_tier(
         session.driver = driver
 
     session.warm_hit = warm_hit
-    progress.set_warm_hit(warm_hit)
+    lease.set_warm_hit(warm_hit)
     boot_ms = int((time.monotonic() - boot_started) * 1000)
     logger.info(
         "scrape_boot request_id=%s warm_hit=%s boot_ms=%d",
@@ -320,7 +337,7 @@ def run_browser_tier(
 
     configure_driver(driver, payload, target_url, collector=collector)
     browser_ready_monotonic = time.monotonic()
-    progress.mark(
+    lease.mark(
         TimeoutPhase.WORK,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
@@ -328,7 +345,7 @@ def run_browser_tier(
     for attempt_index, strategy in enumerate(strategies, start=1):
         attempts = attempt_index
         has_more = attempt_index < len(strategies)
-        progress.mark(
+        lease.mark(
             TimeoutPhase.WORK,
             attempts=attempts,
             strategy_used=strategy,
@@ -345,7 +362,6 @@ def run_browser_tier(
                 strategy=strategy,
                 started_monotonic=started_monotonic,
             )
-        remaining_work = remaining_work_seconds(settings, browser_ready_monotonic)
         try:
             navigate(driver, target_url, strategy, step_budget)
             mid_wait = wait_for_readiness(
@@ -354,20 +370,14 @@ def run_browser_tier(
                 timeout_seconds=min(payload.wait_timeout_seconds, step_budget),
             )
             if mid_wait is not None:
-                blocked = _surface_unclean(
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
                     assessment=mid_wait,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work,
-                    collector=collector,
                 )
-                if blocked is None:
-                    continue
-                return blocked
 
             if payload.scroll:
                 apply_scrolling(driver)
@@ -377,20 +387,14 @@ def run_browser_tier(
             )
 
             if not assessment.is_clean:
-                blocked = _surface_unclean(
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
                     assessment=assessment,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work,
-                    collector=collector,
                 )
-                if blocked is None:
-                    continue
-                return blocked
 
             return build_success(
                 target_url,
@@ -418,25 +422,16 @@ def run_browser_tier(
                 attempt_index,
                 str(exc),
             )
-            # Prefer knowable challenge over timeout when the page is inspectable.
             assessment = _inspect_assessment(driver)
-            if assessment is not None and not assessment.is_clean:
-                blocked = _surface_unclean(
+            if assessment is None or not assessment.is_clean:
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
-                    assessment=assessment,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work_seconds(
-                        settings, browser_ready_monotonic
-                    ),
-                    collector=collector,
+                    assessment=assessment or UNREADABLE_SURFACE,
                 )
-                if blocked is None:
-                    continue
-                return blocked
             if has_more:
                 collector.reset()
                 continue

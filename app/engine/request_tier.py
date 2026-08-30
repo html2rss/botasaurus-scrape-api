@@ -12,8 +12,8 @@ from app.engine.budget import (
     remaining_total_seconds,
 )
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
+from app.engine.work_lease import WorkLease
 from app.infra.detector import ChallengeDetector
-from app.infra.scrape_progress import ScrapeProgress
 from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
@@ -29,7 +29,7 @@ def run_request_tier(
     payload: ScrapeRequest,
     request_id: str,
     started_monotonic: float,
-    progress: ScrapeProgress,
+    lease: WorkLease,
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError | None:
@@ -38,7 +38,7 @@ def run_request_tier(
     target_url = str(payload.url)
     remaining_budget = remaining_total_seconds(settings, started_monotonic)
     if remaining_budget <= 0:
-        progress.mark(
+        lease.mark(
             TimeoutPhase.WORK,
             attempts=1,
             execution_tier=ExecutionTier.HTTP_REQUEST,
@@ -54,7 +54,7 @@ def run_request_tier(
             timeout_phase=TimeoutPhase.WORK,
         )
 
-    progress.mark(
+    lease.mark(
         TimeoutPhase.WORK,
         attempts=1,
         execution_tier=ExecutionTier.HTTP_REQUEST,

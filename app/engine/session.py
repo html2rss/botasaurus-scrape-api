@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import shutil
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -12,20 +13,32 @@ from app.engine.driver_capabilities import DriverProtocol, call_quietly
 if TYPE_CHECKING:
     from app.engine.orchestrator import ScraperEngine
     from app.engine.warm_pool import DriverFingerprint
+    from app.engine.work_lease import WorkLease
 
 
 class ScrapeSession:
     """Encapsulates per-request concurrency registration and filesystem isolation."""
 
-    def __init__(self, engine: ScraperEngine, request_id: str) -> None:
+    def __init__(
+        self,
+        engine: ScraperEngine,
+        request_id: str,
+        *,
+        lease: WorkLease | None = None,
+    ) -> None:
         self.engine = engine
         self.request_id = request_id
+        self.lease = lease
         self.runtime_dir = engine.runtime_root / request_id
         self.profile_dir = self.runtime_dir / "profile"
         self.driver: DriverProtocol | None = None
         self.adopted_profile_dir: Path | None = None
         self.warm_fingerprint: DriverFingerprint | None = None
         self.warm_hit: bool | None = None
+        self._close_lock = threading.Lock()
+        # Register before __enter__ so reclaim during prepare_runtime still binds.
+        if self.lease is not None:
+            self.lease.register_reclaim(self.force_close)
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -35,6 +48,19 @@ class ScrapeSession:
             self.engine.unregister_request_id(self.request_id)
             raise
         return self
+
+    def force_close(self) -> None:
+        """Lease-deadline reclaim: close Chromium if present (idempotent).
+
+        Must not arm a one-shot flag while driver is still None — cold boot
+        assigns the driver after session enter; an early reclaim must leave
+        __exit__ able to close the later-assigned driver.
+        """
+        with self._close_lock:
+            driver = self.driver
+            self.driver = None
+        if driver is not None:
+            call_quietly(driver, "close")
 
     def prepare_runtime_dir(self) -> None:
         """Create the request runtime dir only (warm-path adoption)."""
@@ -65,8 +91,7 @@ class ScrapeSession:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         try:
-            if self.driver is not None:
-                call_quietly(self.driver, "close")
+            self.force_close()
         finally:
             shutil.rmtree(self.runtime_dir, ignore_errors=True)
             if self.adopted_profile_dir is not None:

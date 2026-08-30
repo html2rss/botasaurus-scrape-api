@@ -21,10 +21,11 @@ app/
     openapi_examples.py      # OpenAPI examples built from Pydantic model instances
     routes/                  # thin HTTP handlers (health, scrape)
   domain/
-    scrape_service.py        # request-id resolution, URL guardrails, threadpool execution, status mapping
+    scrape_service.py        # request-id resolution, URL guardrails, WorkLease execution, status mapping
   engine/
     orchestrator.py          # ScraperEngine.execute
-    session.py               # ScrapeSession lifecycle
+    session.py               # ScrapeSession lifecycle + lease reclaim hook
+    work_lease.py            # WorkLease admit/deadline/reclaim + phase snapshot; HostConcurrencyGate
     budget.py                # wall-clock budget math shared across tiers (elapsed_ms, step budgets)
     request_tier.py          # HTTP/curl_cffi path
     browser_tier.py          # Chromium path
@@ -36,22 +37,26 @@ app/
     enums.py                 # ExecutionMode, NavigationMode, ErrorCategory, ...
     request.py               # ScrapeRequest and validators
     response.py              # ScrapeSuccess, ScrapeError, HealthResponse, ...
-  infra/                     # telemetry, progress, metadata, xhr, runtime cleanup, sentry
+  infra/                     # telemetry, metadata, xhr, runtime cleanup, sentry, challenge detector
+                             # (phase snapshot lives on WorkLease — not a separate progress module)
   security/                  # UrlGuard SSRF guardrails
 scripts/
   bench_scrape.py            # TestClient wall-time bench for POST /scrape (request tier)
-tests/
-  api/                       # HTTP contract, request schema, 504 timeout envelope tests
-  domain/                    # ScrapeService unit tests (timeout error mapping)
-  engine/                    # ScraperEngine units, isolation regressions, timeout progress
-  infra/                     # challenge, metadata, xhr, progress, sentry, telemetry, request-id, cleanup
-  security/                  # UrlGuard tests
-  support/
-    http.py                  # test_client() context manager + dependency_overrides helper
-    fakes.py                 # shared FakeDriver, FakeRequest, fake_request_cls, ...
-    factories.py             # scrape_request(), example_url()
-  test_bench_regression.py   # lightweight guard that bench script completes (root: guards scripts/)
+  tests/
+    api/                       # HTTP contract, request schema, 504 timeout envelope tests
+    domain/                    # ScrapeService unit tests (timeout error mapping)
+    engine/                    # ScraperEngine units, isolation regressions, timeout progress
+    fixtures/challenge/        # shared interstitial HTML corpus (gem BlockedSurface loads sibling path)
+    infra/                     # challenge, metadata, xhr, sentry, telemetry, request-id, cleanup
+    security/                  # UrlGuard tests
+    support/
+      http.py                  # test_client() context manager + dependency_overrides helper
+      fakes.py                 # shared FakeDriver, FakeRequest, fake_request_cls, ...
+      factories.py             # scrape_request(), example_url()
+    test_bench_regression.py   # lightweight guard that bench script completes (root: guards scripts/)
 ```
+
+**Challenge corpus:** HTML under `tests/fixtures/challenge/` is the single fixture home for interstitial detection. Scrape-api `ChallengeDetector` markers and gem `BlockedSurface` signatures must both assert those files; do not reintroduce one-sided markers without a shared fixture.
 
 Layer rules:
 
@@ -91,11 +96,15 @@ Conventions:
 | --- | --- | --- |
 | `ScraperEngine` | process (app.state) | shared |
 | `ThreadPoolExecutor` | process (app.state) | shared, sized by `SCRAPE_MAX_WORKERS` |
+| `HostConcurrencyGate` | process (ScrapeService) | per-host admit; sized by `SCRAPE_MAX_PER_HOST` |
+| `WorkLease` | per request | owns admit → executor run → deadline reclaim (session `force_close`); phase snapshot for timeout envelope; `Future.cancel` is not Chromium reclaim |
 | `WarmDriverPool` (opt-in) | process (engine.warm_pool) | single spare slot; refill on dedicated daemon thread — never the scrape executor |
 | `_active_request_ids` | in-process memory | shared; collision guard |
 | runtime dir `/tmp/scrape/<request_id>` | per request | isolated; deleted in `finally` |
 | browser profile | per request (or adopted spare-*) | isolated; no reuse across requests; warm spare dies with the adopting request |
-| Botasaurus Driver | may start before assignment | usage stays ≤1 request; closed in session `__exit__`; never returned to the pool |
+| Botasaurus Driver | may start before assignment | usage stays ≤1 request; closed in session `__exit__` / lease reclaim; never returned to the pool |
+
+**Timeout ownership:** `WorkLease` is the single owner of outer deadline, host admit, phase snapshot, and Chromium reclaim. Tiers mark phase on the lease; `WorkLease.timeout_error` is the only outer-timeout envelope builder. Session exit and orphan prune remain safety nets under lease reclaim — not a second reclaim story.
 
 Multi-worker uvicorn breaks in-process collision detection unless request ids are sticky to a worker. Default to single-worker for isolation semantics.
 

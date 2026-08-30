@@ -8,28 +8,25 @@ from typing import cast
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.schemas.response import ChallengeSignal
 
+# Markers shared with html2rss BlockedSurface via tests/fixtures/challenge/.
+# One-sided substrings without a shared fixture were deleted in the corpus trim.
 _CHALLENGE_MARKERS: tuple[str, ...] = (
-    "challenge-error-text",
-    "Enable JavaScript and cookies to continue",
     "Just a moment...",
+    "checking your browser before accessing",
+    "Enable JavaScript and cookies to continue",
     "cf-challenge",
-    "cf-turnstile",
+    "cdn-cgi/challenge-platform",
+    "cloudflare ray id",
     "captcha-delivery.com",
     "datadome",
-    "DataDome CAPTCHA",
-    "/captcha/?",
-    "attention required! | cloudflare",
-    "cloudflare-ray-id",
-    "shield.recaptcha.net",
-    "geo.captcha-delivery.com",
+    "Vercel Security Checkpoint",
+    "checking the security",
+    "vercel.com/security",
 )
 
 _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
     (m, m.lower()) for m in _CHALLENGE_MARKERS
 )
-
-# Soft strategy retries need this much remaining work budget (seconds).
-_MIN_SOFT_RETRY_REMAINING_SECONDS = 5
 
 _DRIVER_SIGNAL_METHODS: tuple[tuple[str, str], ...] = (
     ("is_bot_detected", "botasaurus_driver_bot_detected"),
@@ -48,17 +45,6 @@ class ChallengeAssessment:
     def is_clean(self) -> bool:
         return not self.blocked_detected and not self.challenge_detected
 
-    def may_retry_strategies(
-        self, *, has_more: bool, remaining_seconds: float | int
-    ) -> bool:
-        """Soft challenge markers may retry strategies; hard HTTP blocks do not.
-
-        Requires enough remaining *work* budget so another strategy can finish.
-        """
-        if remaining_seconds < _MIN_SOFT_RETRY_REMAINING_SECONDS:
-            return False
-        return self.challenge_detected and has_more
-
     def to_signal(self) -> ChallengeSignal:
         """Convert domain assessment to wire ChallengeSignal DTO."""
         return ChallengeSignal(
@@ -66,6 +52,13 @@ class ChallengeAssessment:
             detected=self.challenge_detected,
             marker=self.detected_marker,
         )
+
+
+UNREADABLE_SURFACE = ChallengeAssessment(
+    blocked_detected=True,
+    challenge_detected=True,
+    detected_marker="unreadable_surface",
+)
 
 
 class ChallengeDetector:
