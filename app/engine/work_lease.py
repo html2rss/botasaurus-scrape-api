@@ -82,6 +82,7 @@ class WorkLease:
         self._lock = threading.Lock()
         self._snap = LeaseSnapshot()
         self._reclaim_hooks: list[Callable[[], None]] = []
+        self._inflight: asyncio.Future[object] | None = None
 
     @classmethod
     def tracking_only(cls, settings: Settings | None = None) -> WorkLease:
@@ -180,6 +181,8 @@ class WorkLease:
 
             loop = asyncio.get_running_loop()
             awaitable = asyncio.ensure_future(loop.run_in_executor(self.executor, work))
+            # Strong ref: shielded tasks are only weakly held by the loop.
+            self._inflight = awaitable
             try:
                 return await asyncio.wait_for(
                     asyncio.shield(awaitable), timeout=remaining
@@ -187,5 +190,10 @@ class WorkLease:
             except TimeoutError:
                 self.reclaim()
                 raise
+            finally:
+                if awaitable.done():
+                    self._inflight = None
+                else:
+                    awaitable.add_done_callback(lambda _f: None)
         finally:
             self.host_gate.release(host)

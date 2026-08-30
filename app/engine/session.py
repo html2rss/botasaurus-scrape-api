@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import errno
 import shutil
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -34,7 +35,7 @@ class ScrapeSession:
         self.adopted_profile_dir: Path | None = None
         self.warm_fingerprint: DriverFingerprint | None = None
         self.warm_hit: bool | None = None
-        self._closed = False
+        self._close_lock = threading.Lock()
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -48,12 +49,17 @@ class ScrapeSession:
         return self
 
     def force_close(self) -> None:
-        """Lease-deadline reclaim: close Chromium once so the worker slot can free."""
-        if self._closed:
-            return
-        self._closed = True
-        if self.driver is not None:
-            call_quietly(self.driver, "close")
+        """Lease-deadline reclaim: close Chromium if present (idempotent).
+
+        Must not arm a one-shot flag while driver is still None — cold boot
+        assigns the driver after session enter; an early reclaim must leave
+        __exit__ able to close the later-assigned driver.
+        """
+        with self._close_lock:
+            driver = self.driver
+            self.driver = None
+        if driver is not None:
+            call_quietly(driver, "close")
 
     def prepare_runtime_dir(self) -> None:
         """Create the request runtime dir only (warm-path adoption)."""
