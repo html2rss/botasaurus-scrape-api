@@ -1,4 +1,4 @@
-"""Browser-tier challenge-before-timeout and hard-block abort."""
+"""Browser-tier challenge-before-timeout and fail-closed unclean surfaces."""
 
 from __future__ import annotations
 
@@ -141,42 +141,43 @@ class BrowserTierChallengeTests(unittest.TestCase):
         self.assertTrue(result.diagnostics.challenge.blocked)
         self.assertFalse(result.diagnostics.challenge.detected)
 
-    def test_soft_challenge_retries_strategies_then_blocks(self) -> None:
+    def test_challenge_fails_closed_without_strategy_retry(self) -> None:
         result = self._execute(
             _SoftChallengeDriver,
             navigation_mode=NavigationMode.AUTO,
             max_retries=2,
-            request_id="req-soft-challenge",
+            request_id="req-challenge-once",
         )
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
-        self.assertEqual(result.diagnostics.attempts, 3)
-        self.assertEqual(_SoftChallengeDriver.navigate_calls, 3)
+        self.assertEqual(result.diagnostics.attempts, 1)
+        self.assertEqual(_SoftChallengeDriver.navigate_calls, 1)
         assert result.diagnostics.challenge is not None
         self.assertTrue(result.diagnostics.challenge.detected)
 
-    def test_soft_challenge_does_not_retry_when_work_budget_low(self) -> None:
-        """Below soft-retry floor, unclean assessment is challenge_block immediately."""
-        _SoftChallengeDriver.reset()
+    def test_unreadable_hung_surface_returns_challenge_block(self) -> None:
+        _CleanTimeoutDriver.reset()
         payload = scrape_request(
             execution_mode=ExecutionMode.BROWSER,
-            navigation_mode=NavigationMode.AUTO,
-            max_retries=2,
+            navigation_mode=NavigationMode.GET,
+            max_retries=0,
         )
         with tempfile.TemporaryDirectory() as tmp:
             engine = ScraperEngine(settings=get_settings(), runtime_root=Path(tmp))
             with (
-                patch("botasaurus.browser.Driver", _SoftChallengeDriver),
+                patch("botasaurus.browser.Driver", _CleanTimeoutDriver),
                 patch(
-                    "app.engine.browser_tier.remaining_work_seconds",
-                    return_value=4,
+                    "app.engine.browser_tier._inspect_assessment",
+                    return_value=None,
                 ),
             ):
-                result = engine.execute(payload, request_id="req-soft-low-budget")
+                result = engine.execute(payload, request_id="req-unreadable")
         self.assertIsInstance(result, ScrapeError)
         assert isinstance(result, ScrapeError)
         self.assertEqual(result.error_category, ErrorCategory.CHALLENGE_BLOCK)
-        self.assertEqual(result.diagnostics.attempts, 1)
-        self.assertEqual(_SoftChallengeDriver.navigate_calls, 1)
+        self.assertIsNone(result.diagnostics.timeout_phase)
+        assert result.diagnostics.challenge is not None
+        self.assertEqual(result.diagnostics.challenge.marker, "unreadable_surface")
+        self.assertEqual(_CleanTimeoutDriver.navigate_calls, 1)
 
     def test_mid_wait_challenge_returns_challenge_block(self) -> None:
         class _MidWaitChallengeDriver(_ScenarioDriver):

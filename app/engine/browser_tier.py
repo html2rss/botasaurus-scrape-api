@@ -12,7 +12,6 @@ from app.engine.budget import (
     browser_step_budget_seconds,
     elapsed_ms,
     is_timeout_exception,
-    remaining_work_seconds,
 )
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
@@ -120,11 +119,8 @@ def _surface_unclean(
     strategy: NavigationMode,
     started_monotonic: float,
     assessment: ChallengeAssessment,
-    has_more_strategies: bool,
-    remaining_work: int,
-    collector: XhrCollector,
-) -> ScrapeError | None:
-    """Log and apply unclean assessment. None ⇒ soft-retry / continue."""
+) -> ScrapeError:
+    """Fail closed: any unclean assessment is challenge_block (no soft-retry)."""
     logger.warning(
         "scrape_challenge_detected request_id=%s host=%s strategy=%s "
         "attempt=%d marker=%s",
@@ -134,12 +130,6 @@ def _surface_unclean(
         attempts,
         assessment.detected_marker,
     )
-    if assessment.may_retry_strategies(
-        has_more=has_more_strategies,
-        remaining_seconds=remaining_work,
-    ):
-        collector.reset()
-        return None
     return _challenge_block_error(
         target_url,
         request_id=request_id,
@@ -148,6 +138,13 @@ def _surface_unclean(
         render_ms=elapsed_ms(started_monotonic),
         assessment=assessment,
     )
+
+
+_UNREADABLE_SURFACE = ChallengeAssessment(
+    blocked_detected=True,
+    challenge_detected=True,
+    detected_marker="unreadable_surface",
+)
 
 
 def _boot_storage_error(
@@ -345,7 +342,6 @@ def run_browser_tier(
                 strategy=strategy,
                 started_monotonic=started_monotonic,
             )
-        remaining_work = remaining_work_seconds(settings, browser_ready_monotonic)
         try:
             navigate(driver, target_url, strategy, step_budget)
             mid_wait = wait_for_readiness(
@@ -354,20 +350,14 @@ def run_browser_tier(
                 timeout_seconds=min(payload.wait_timeout_seconds, step_budget),
             )
             if mid_wait is not None:
-                blocked = _surface_unclean(
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
                     assessment=mid_wait,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work,
-                    collector=collector,
                 )
-                if blocked is None:
-                    continue
-                return blocked
 
             if payload.scroll:
                 apply_scrolling(driver)
@@ -377,20 +367,14 @@ def run_browser_tier(
             )
 
             if not assessment.is_clean:
-                blocked = _surface_unclean(
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
                     assessment=assessment,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work,
-                    collector=collector,
                 )
-                if blocked is None:
-                    continue
-                return blocked
 
             return build_success(
                 target_url,
@@ -418,25 +402,16 @@ def run_browser_tier(
                 attempt_index,
                 str(exc),
             )
-            # Prefer knowable challenge over timeout when the page is inspectable.
             assessment = _inspect_assessment(driver)
-            if assessment is not None and not assessment.is_clean:
-                blocked = _surface_unclean(
+            if assessment is None or not assessment.is_clean:
+                return _surface_unclean(
                     target_url,
                     request_id=request_id,
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
-                    assessment=assessment,
-                    has_more_strategies=has_more,
-                    remaining_work=remaining_work_seconds(
-                        settings, browser_ready_monotonic
-                    ),
-                    collector=collector,
+                    assessment=assessment or _UNREADABLE_SURFACE,
                 )
-                if blocked is None:
-                    continue
-                return blocked
             if has_more:
                 collector.reset()
                 continue

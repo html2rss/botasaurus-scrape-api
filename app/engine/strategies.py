@@ -131,10 +131,10 @@ def wait_for_readiness(
     selector: str | None,
     timeout_seconds: int,
 ) -> ChallengeAssessment | None:
-    """Wait for selector / settle; return unclean assessment if challenge appears mid-wait.
+    """Wait for selector / settle; return unclean assessment if challenge appears.
 
-    Selector waits run in ≤2s chunks so a challenge interstitial can fail closed
-    before the full wait budget burns. Non-selector settles stay short and probe once.
+    Selector waits run in ≤2s chunks so a challenge interstitial fails closed
+    before the full wait budget burns. Non-selector settles probe once.
     """
     if not selector:
         if (

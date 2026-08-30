@@ -52,7 +52,6 @@ class ScraperEngineUnitTests(unittest.TestCase):
             1020.0,  # browser ready after boot
             1020.0,  # remaining total (step budget)
             1020.0,  # remaining work (step budget)
-            1020.0,  # remaining work (soft-retry gate)
             1020.0,  # render_ms
         ]
 
