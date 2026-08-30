@@ -42,18 +42,21 @@ app/
   security/                  # UrlGuard SSRF guardrails
 scripts/
   bench_scrape.py            # TestClient wall-time bench for POST /scrape (request tier)
-tests/
-  api/                       # HTTP contract, request schema, 504 timeout envelope tests
-  domain/                    # ScrapeService unit tests (timeout error mapping)
-  engine/                    # ScraperEngine units, isolation regressions, timeout progress
-  infra/                     # challenge, metadata, xhr, progress, sentry, telemetry, request-id, cleanup
-  security/                  # UrlGuard tests
-  support/
-    http.py                  # test_client() context manager + dependency_overrides helper
-    fakes.py                 # shared FakeDriver, FakeRequest, fake_request_cls, ...
-    factories.py             # scrape_request(), example_url()
-  test_bench_regression.py   # lightweight guard that bench script completes (root: guards scripts/)
+  tests/
+    api/                       # HTTP contract, request schema, 504 timeout envelope tests
+    domain/                    # ScrapeService unit tests (timeout error mapping)
+    engine/                    # ScraperEngine units, isolation regressions, timeout progress
+    fixtures/challenge/        # shared interstitial HTML corpus (gem BlockedSurface loads sibling path)
+    infra/                     # challenge, metadata, xhr, sentry, telemetry, request-id, cleanup
+    security/                  # UrlGuard tests
+    support/
+      http.py                  # test_client() context manager + dependency_overrides helper
+      fakes.py                 # shared FakeDriver, FakeRequest, fake_request_cls, ...
+      factories.py             # scrape_request(), example_url()
+    test_bench_regression.py   # lightweight guard that bench script completes (root: guards scripts/)
 ```
+
+**Challenge corpus:** HTML under `tests/fixtures/challenge/` is the single fixture home for interstitial detection. Scrape-api `ChallengeDetector` markers and gem `BlockedSurface` signatures must both assert those files; do not reintroduce one-sided markers without a shared fixture.
 
 Layer rules:
 

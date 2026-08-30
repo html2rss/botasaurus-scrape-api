@@ -8,20 +8,20 @@ from typing import cast
 from app.engine.driver_capabilities import DriverProtocol, call_if_available
 from app.schemas.response import ChallengeSignal
 
+# Markers shared with html2rss BlockedSurface via tests/fixtures/challenge/.
+# One-sided substrings without a shared fixture were deleted in the corpus trim.
 _CHALLENGE_MARKERS: tuple[str, ...] = (
-    "challenge-error-text",
-    "Enable JavaScript and cookies to continue",
     "Just a moment...",
+    "checking your browser before accessing",
+    "Enable JavaScript and cookies to continue",
     "cf-challenge",
-    "cf-turnstile",
+    "cdn-cgi/challenge-platform",
+    "cloudflare ray id",
     "captcha-delivery.com",
     "datadome",
-    "DataDome CAPTCHA",
-    "/captcha/?",
-    "attention required! | cloudflare",
-    "cloudflare-ray-id",
-    "shield.recaptcha.net",
-    "geo.captcha-delivery.com",
+    "Vercel Security Checkpoint",
+    "checking the security",
+    "vercel.com/security",
 )
 
 _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
