@@ -105,6 +105,18 @@ class ScraperEngine:
             started_monotonic = now
         lease = lease or WorkLease.tracking_only(self.settings)
 
+        if lease.aborted:
+            # Outer deadline reclaimed before/without session enter — exit without
+            # Chromium so host-gate release stays honest vs live browsers.
+            phase = lease.snapshot().phase
+            return build_error(
+                target_url,
+                TIMEOUT_ERROR_BY_PHASE[phase],
+                request_id=resolved_request_id,
+                error_category=ErrorCategory.TIMEOUT,
+                timeout_phase=phase,
+            )
+
         if deadline_monotonic is not None and now >= deadline_monotonic:
             lease.mark(TimeoutPhase.QUEUE)
             return build_error(

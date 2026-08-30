@@ -12,7 +12,11 @@ from app.engine.driver_capabilities import (
     resolve_callable,
     resolve_cdp_tab,
 )
-from app.infra.detector import ChallengeAssessment, ChallengeDetector
+from app.infra.detector import (
+    UNREADABLE_SURFACE,
+    ChallengeAssessment,
+    ChallengeDetector,
+)
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
 from app.schemas.enums import NavigationMode
@@ -114,11 +118,15 @@ def configure_driver(
 
 
 def _mid_wait_challenge(driver: DriverProtocol) -> ChallengeAssessment | None:
-    """Best-effort challenge probe during readiness wait. None if clean or unreadable."""
+    """Probe during readiness wait. None if clean; unclean/unreadable otherwise.
+
+    Unreadable surfaces fail closed immediately so selector waits do not burn
+    remaining budget on a hostile/hung tab.
+    """
     try:
         html = driver.page_html or ""
     except Exception:
-        return None
+        return UNREADABLE_SURFACE
     assessment = ChallengeDetector.detect(html, driver=driver)
     if assessment.is_clean:
         return None
@@ -131,10 +139,10 @@ def wait_for_readiness(
     selector: str | None,
     timeout_seconds: int,
 ) -> ChallengeAssessment | None:
-    """Wait for selector / settle; return unclean assessment if challenge appears.
+    """Wait for selector / settle; return unclean/unreadable assessment to fail closed.
 
-    Selector waits run in ≤2s chunks so a challenge interstitial fails closed
-    before the full wait budget burns. Non-selector settles probe once.
+    Selector waits run in ≤2s chunks so a challenge or unreadable surface fails
+    closed before the full wait budget burns. Non-selector settles probe once.
     """
     if not selector:
         if (

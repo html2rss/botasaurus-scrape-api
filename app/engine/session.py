@@ -36,6 +36,9 @@ class ScrapeSession:
         self.warm_fingerprint: DriverFingerprint | None = None
         self.warm_hit: bool | None = None
         self._close_lock = threading.Lock()
+        # Register before __enter__ so reclaim during prepare_runtime still binds.
+        if self.lease is not None:
+            self.lease.register_reclaim(self.force_close)
 
     def __enter__(self) -> ScrapeSession:
         self.engine.register_request_id(self.request_id)
@@ -44,8 +47,6 @@ class ScrapeSession:
         except Exception:
             self.engine.unregister_request_id(self.request_id)
             raise
-        if self.lease is not None:
-            self.lease.register_reclaim(self.force_close)
         return self
 
     def force_close(self) -> None:

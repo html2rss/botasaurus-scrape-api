@@ -54,6 +54,13 @@ class ChallengeAssessment:
         )
 
 
+UNREADABLE_SURFACE = ChallengeAssessment(
+    blocked_detected=True,
+    challenge_detected=True,
+    detected_marker="unreadable_surface",
+)
+
+
 class ChallengeDetector:
     """Deep module encapsulating anti-bot challenge heuristics, HTTP status codes, and driver checks."""
 

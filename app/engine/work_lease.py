@@ -65,8 +65,9 @@ class WorkLease:
     """Owns admit → run → terminal timeout; reclaim kills the session driver once.
 
     Progress phase lives on the lease (replaces ScrapeProgress). Outer deadline
-    calls register_reclaim hooks (session force-close); Future.cancel is not the
-    Chromium reclaim story.
+    sets ``aborted`` and runs register_reclaim hooks (session force-close);
+    Future.cancel is not the Chromium reclaim story. Workers check ``aborted``
+    before booting Chromium so host-gate release stays honest.
     """
 
     def __init__(
@@ -83,6 +84,7 @@ class WorkLease:
         self._snap = LeaseSnapshot()
         self._reclaim_hooks: list[Callable[[], None]] = []
         self._inflight: asyncio.Future[object] | None = None
+        self._aborted = threading.Event()
 
     @classmethod
     def tracking_only(cls, settings: Settings | None = None) -> WorkLease:
@@ -90,6 +92,11 @@ class WorkLease:
         from app.config import get_settings
 
         return cls(settings=settings or get_settings())
+
+    @property
+    def aborted(self) -> bool:
+        """True after outer deadline reclaim — workers must not boot Chromium."""
+        return self._aborted.is_set()
 
     def mark(
         self,
@@ -124,6 +131,8 @@ class WorkLease:
             self._reclaim_hooks.append(hook)
 
     def reclaim(self) -> None:
+        """Mark abort then run hooks so late-bound sessions still force-close."""
+        self._aborted.set()
         with self._lock:
             hooks = list(self._reclaim_hooks)
         for hook in hooks:

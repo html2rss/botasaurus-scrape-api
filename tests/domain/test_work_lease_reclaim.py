@@ -75,7 +75,22 @@ class WorkLeaseReclaimTests(unittest.IsolatedAsyncioTestCase):
         result = await lease.run(host="ok.example", work=lambda: "ok")
         self.assertEqual(result, "ok")
         self.assertEqual(reclaim_calls, 0)
+        self.assertFalse(lease.aborted)
         executor.shutdown(wait=False, cancel_futures=True)
+
+    async def test_reclaim_sets_aborted_before_hooks(self) -> None:
+        settings = _fast_settings(max_per_host=1, timeout_seconds=5)
+        lease = WorkLease.tracking_only(settings)
+        seen_aborted = False
+
+        def hook() -> None:
+            nonlocal seen_aborted
+            seen_aborted = lease.aborted
+
+        lease.register_reclaim(hook)
+        lease.reclaim()
+        self.assertTrue(lease.aborted)
+        self.assertTrue(seen_aborted)
 
 
 if __name__ == "__main__":

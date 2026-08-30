@@ -26,7 +26,11 @@ from app.engine.strategies import (
 )
 from app.engine.warm_pool import DriverFingerprint
 from app.engine.work_lease import WorkLease
-from app.infra.detector import ChallengeAssessment, ChallengeDetector
+from app.infra.detector import (
+    UNREADABLE_SURFACE,
+    ChallengeAssessment,
+    ChallengeDetector,
+)
 from app.infra.metadata import MetadataExtractor, MetadataResult
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger
@@ -140,13 +144,6 @@ def _surface_unclean(
     )
 
 
-_UNREADABLE_SURFACE = ChallengeAssessment(
-    blocked_detected=True,
-    challenge_detected=True,
-    detected_marker="unreadable_surface",
-)
-
-
 def _boot_storage_error(
     target_url: str,
     request_id: str,
@@ -238,6 +235,17 @@ def run_browser_tier(
         TimeoutPhase.BOOT,
         execution_tier=ExecutionTier.BROWSER_DRIVER,
     )
+    if lease.aborted:
+        return build_error(
+            target_url,
+            TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
+            request_id=request_id,
+            error_category=ErrorCategory.TIMEOUT,
+            attempts=0,
+            render_ms=elapsed_ms(started_monotonic),
+            execution_tier=ExecutionTier.BROWSER_DRIVER,
+            timeout_phase=TimeoutPhase.BOOT,
+        )
     fingerprint = DriverFingerprint.from_request(payload)
     session.warm_fingerprint = fingerprint
     warm_hit = False
@@ -261,6 +269,18 @@ def run_browser_tier(
             session.prepare_profile_dirs()
         except OSError as exc:
             return _boot_storage_error(target_url, request_id, started_monotonic, exc)
+
+        if lease.aborted:
+            return build_error(
+                target_url,
+                TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
+                request_id=request_id,
+                error_category=ErrorCategory.TIMEOUT,
+                attempts=0,
+                render_ms=elapsed_ms(started_monotonic),
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                timeout_phase=TimeoutPhase.BOOT,
+            )
 
         driver_window_size = (
             [payload.window_size.width, payload.window_size.height]
@@ -410,7 +430,7 @@ def run_browser_tier(
                     attempts=attempts,
                     strategy=strategy,
                     started_monotonic=started_monotonic,
-                    assessment=assessment or _UNREADABLE_SURFACE,
+                    assessment=assessment or UNREADABLE_SURFACE,
                 )
             if has_more:
                 collector.reset()
