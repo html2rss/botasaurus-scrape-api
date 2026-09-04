@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Protocol
 
@@ -59,7 +59,7 @@ def test_client(
     settings: Settings | None = None,
     engine: ScraperEngine | None = None,
     execute_side_effect: ExecuteSideEffect | None = None,
-) -> Iterator[TestClient]:
+) -> Generator[TestClient]:
     app: FastAPI = create_app(settings)
     bound_engine: ScraperEngine | None = engine
 
