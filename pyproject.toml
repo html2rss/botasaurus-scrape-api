@@ -8,13 +8,13 @@ dependencies = [
     "fastapi==0.141.1",
     "uvicorn==0.53.0",
     "pydantic-settings==2.15.0",
-    "sentry-sdk==2.69.2",
+    "sentry-sdk==2.70.0",
     "botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.8",
+    "ruff==0.16.9",
     "PyYAML==6.0.3",
     "pyright==1.1.414",
 ]
