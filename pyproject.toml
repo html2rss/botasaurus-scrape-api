@@ -5,16 +5,16 @@ description = "Docker-first FastAPI wrapper around Botasaurus for rendered HTML 
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi==0.141.1",
-    "uvicorn==0.53.0",
+    "fastapi==0.142.2",
+    "uvicorn==0.54.0",
     "pydantic-settings==2.15.0",
-    "sentry-sdk==2.70.0",
+    "sentry-sdk==2.71.0",
     "botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "ruff==0.16.9",
+    "ruff==0.16.10",
     "PyYAML==6.0.3",
     "pyright==1.1.414",
 ]
