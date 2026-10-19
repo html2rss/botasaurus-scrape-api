@@ -20,13 +20,22 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
 
 ## Quick Start (Docker Only)
 
-Run directly with Docker:
+The supported run is a hardened container: read-only root filesystem, all
+capabilities dropped, no-new-privileges, and writable tmpfs mounts for `/tmp`
+and `$HOME` (uid/gid of `appuser`). Chromium crashpad needs a writable HOME;
+request profiles live under `/tmp/scrape` on the `/tmp` tmpfs.
 
 ```bash
-docker run --rm -p 4010:4010 html2rss/botasaurus-scrape-api:latest
+docker run --rm -p 4010:4010 \
+  --init --shm-size=1gb \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /tmp:size=512m \
+  --tmpfs /home/appuser:size=128m,uid=1000,gid=1000,mode=700 \
+  --memory 2g \
+  html2rss/botasaurus-scrape-api:latest
 ```
 
-Or run from this repository directory:
+Or run from this repository directory (`make serve` uses the same hardening):
 
 ```bash
 make serve
@@ -86,7 +95,7 @@ Publish policy:
 
 ## Smoke Test
 
-Run end-to-end smoke checks (build, boot, health, scrape happy path, localhost guardrail, diagnostics, isolation):
+Run end-to-end smoke checks (build, boot, health, scrape happy path, localhost guardrail, diagnostics, isolation). Smoke containers use the same production hardening flags as the supported `docker run` above and assert no `/tmp/bota` leftover after browser scrapes.
 
 ```bash
 make smoke
