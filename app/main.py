@@ -19,7 +19,7 @@ from app.logging_config import setup_logging
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved_settings = settings or get_settings()
-    setup_logging()
+    setup_logging(log_format=resolved_settings.log_format.value)
     setup_sentry(resolved_settings)
     openapi_metadata = configure_openapi(resolved_settings)
 
