@@ -325,21 +325,36 @@ class WarmPoolTests(unittest.TestCase):
 
     def test_memory_pressure_skips_refill(self) -> None:
         self.pressure = True
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.setLevel(logging.INFO)
+        logger = get_logger()
+        logger.addHandler(handler)
         pool = self._pool()
         fp = _fp()
-        pool.notify_scrape_finished(fp)
-        self.assertFalse(self.spare_ready.wait(timeout=0.15))
-        self.assertEqual(pool.ready_spare_dirs(), set())
-        self.assertEqual(len(self.built), 0)
-        # Clearing pressure + advancing past deferred wake should refill.
-        # notify_scrape_finished only re-sets desired + wakes (injected clock
-        # vs Event.wait wall time cannot auto-fire the deferred timeout).
-        self.pressure = False
-        self.clock_value += 2.0
-        pool.notify_scrape_finished(fp)
-        self._wait_spare(pool)
-        self.assertEqual(len(self.built), 1)
-        pool.shutdown()
+        try:
+            pool.notify_scrape_finished(fp)
+            self.assertFalse(self.spare_ready.wait(timeout=0.15))
+            self.assertEqual(pool.ready_spare_dirs(), set())
+            self.assertEqual(len(self.built), 0)
+            # Second skip under pressure must not spam another entered line.
+            pool.notify_scrape_finished(fp)
+            self.assertFalse(self.spare_ready.wait(timeout=0.05))
+            # Clearing pressure + advancing past deferred wake should refill.
+            # notify_scrape_finished only re-sets desired + wakes (injected clock
+            # vs Event.wait wall time cannot auto-fire the deferred timeout).
+            self.pressure = False
+            self.clock_value += 2.0
+            pool.notify_scrape_finished(fp)
+            self._wait_spare(pool)
+            self.assertEqual(len(self.built), 1)
+            pool.shutdown()
+        finally:
+            logger.removeHandler(handler)
+        logs = stream.getvalue()
+        self.assertNotIn("skipped=memory_pressure", logs)
+        self.assertEqual(logs.count("memory_pressure state=entered"), 1)
+        self.assertEqual(logs.count("memory_pressure state=cleared"), 1)
 
     def test_prune_after_take_keeps_adopted_spare(self) -> None:
         pool = self._pool()
