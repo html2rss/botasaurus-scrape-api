@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import errno
 import time
-from typing import cast
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -24,7 +23,7 @@ from app.engine.strategies import (
     resolve_strategies,
     wait_for_readiness,
 )
-from app.engine.warm_pool import DriverFingerprint
+from app.engine.warm_pool import DriverFingerprint, create_driver_from_fingerprint
 from app.engine.work_lease import WorkLease
 from app.infra.detector import (
     UNREADABLE_SURFACE,
@@ -227,8 +226,6 @@ def run_browser_tier(
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError:
-    from botasaurus.browser import Driver
-
     target_url = str(payload.url)
     request_id = session.request_id
     lease.mark(
@@ -282,30 +279,8 @@ def run_browser_tier(
                 timeout_phase=TimeoutPhase.BOOT,
             )
 
-        driver_window_size = (
-            [payload.window_size.width, payload.window_size.height]
-            if payload.window_size
-            else None
-        )
-
         try:
-            driver = cast(
-                DriverProtocol,
-                Driver(
-                    headless=payload.headless,
-                    enable_xvfb_virtual_display=not payload.headless,
-                    proxy=payload.proxy,
-                    profile=str(session.profile_dir),
-                    tiny_profile=True,
-                    block_images=payload.block_images,
-                    block_images_and_css=payload.block_images_and_css,
-                    wait_for_complete_page_load=payload.wait_for_complete_page_load,
-                    user_agent=payload.effective_user_agent,
-                    window_size=driver_window_size,
-                    lang=payload.lang,
-                    remove_default_browser_check_argument=True,
-                ),
-            )
+            driver = create_driver_from_fingerprint(fingerprint, session.profile_dir)
         except Exception as exc:
             return _tier_exception_error(
                 target_url,

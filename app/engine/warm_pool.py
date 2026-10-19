@@ -69,7 +69,7 @@ def create_driver_from_fingerprint(
             enable_xvfb_virtual_display=not fingerprint.headless,
             proxy=fingerprint.proxy,
             profile=str(spare_dir),
-            tiny_profile=True,
+            tiny_profile=False,
             block_images=fingerprint.block_images,
             block_images_and_css=fingerprint.block_images_and_css,
             wait_for_complete_page_load=fingerprint.wait_for_complete_page_load,
