@@ -361,6 +361,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | `SCRAPE_PREWARM` | `false` | Opt-in single-slot Chromium prewarm. When `true`, fingerprint-matching browser scrapes reuse a spare driver built after the previous scrape. Requires **single uvicorn worker** when enabled; multi-worker deployments do not share spare state and worker restarts delete foreign `spare-*` dirs. Keep off until canary on `--shm-size=1gb` + `init: true` shows stable RSS. |
 | `SCRAPE_PREWARM_IDLE_TTL_SECONDS` | `600` | Close an unused warm spare after this many seconds. `0` disables idle reap — one Chromium remains in RAM until process exit. |
 | `SCRAPE_PREWARM_MIN_REFILL_SECONDS` | `30` | Minimum interval between spare rebuilds. |
+| `SCRAPE_RUNTIME_STATS_INTERVAL_SECONDS` | `60` | Emit a `runtime_stats` heartbeat (cgroup memory, Chromium process count, `/tmp` free bytes, runtime dirs, active requests, warm spare present). `0` disables the heartbeat. Startup always runs `runtime_preflight` (HOME writable, runtime root writable, Chromium binary present). |
 
 ## Example Calls
 

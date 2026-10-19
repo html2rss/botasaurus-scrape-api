@@ -60,6 +60,10 @@ class ScraperEngine:
         with self._active_request_ids_lock:
             self._active_request_ids.discard(request_id)
 
+    def active_request_count(self) -> int:
+        with self._active_request_ids_lock:
+            return len(self._active_request_ids)
+
     def prune_runtime_dirs(self) -> int:
         # Active request ids and spare dirs are snapshotted atomically for prune.
         with self._active_request_ids_lock:

@@ -89,6 +89,11 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias="SCRAPE_PREWARM_MIN_REFILL_SECONDS",
     )
+    scrape_runtime_stats_interval_seconds: int = Field(
+        default=60,
+        ge=0,
+        validation_alias="SCRAPE_RUNTIME_STATS_INTERVAL_SECONDS",
+    )
     log_format: LogFormat = Field(default=LogFormat.TEXT, validation_alias="LOG_FORMAT")
     runtime_root: Path = Field(default=Path("/tmp/scrape"))
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")

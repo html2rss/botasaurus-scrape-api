@@ -11,11 +11,8 @@ import time
 import unittest
 from pathlib import Path
 
-from app.engine.warm_pool import (
-    DriverFingerprint,
-    WarmDriverPool,
-    cgroup_memory_under_pressure,
-)
+from app.engine.warm_pool import DriverFingerprint, WarmDriverPool
+from app.infra.cgroup import cgroup_memory_under_pressure
 from app.logging_config import get_logger
 from tests.support.factories import scrape_request
 from tests.support.fakes import HealthCheckStub, TrackingDriver

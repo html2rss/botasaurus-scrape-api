@@ -13,6 +13,7 @@ from app.api.openapi import configure_openapi
 from app.config import Settings, get_settings
 from app.engine import ScraperEngine
 from app.engine.warm_pool import WarmDriverPool, create_driver_from_fingerprint
+from app.infra.runtime_stats import RuntimeStatsReporter, run_runtime_preflight
 from app.infra.sentry import flush_sentry, setup_sentry
 from app.logging_config import setup_logging
 
@@ -40,7 +41,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.executor = ThreadPoolExecutor(
             max_workers=max(1, resolved_settings.scrape_max_workers)
         )
+        run_runtime_preflight(runtime_root=engine.runtime_root)
+        stats = RuntimeStatsReporter(
+            interval_seconds=float(
+                resolved_settings.scrape_runtime_stats_interval_seconds
+            ),
+            runtime_root=engine.runtime_root,
+            active_requests=engine.active_request_count,
+            warm_present=lambda: (
+                engine.warm_pool.has_ready_spare()
+                if engine.warm_pool is not None
+                else False
+            ),
+        )
+        app.state.runtime_stats = stats
+        stats.start()
         yield
+        stats.stop()
         if engine.warm_pool is not None:
             engine.warm_pool.shutdown()
         app.state.executor.shutdown(wait=False, cancel_futures=True)

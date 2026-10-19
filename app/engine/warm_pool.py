@@ -27,6 +27,7 @@ from app.engine.driver_capabilities import (
     call_quietly,
     resolve_cdp_tab,
 )
+from app.infra.cgroup import cgroup_memory_under_pressure
 from app.logging_config import get_logger
 
 if TYPE_CHECKING:
@@ -37,9 +38,6 @@ logger = get_logger()
 # Set True when Docker Xvfb spike shows concurrent headless=false drivers collide.
 PREWARM_HEADLESS_ONLY = False
 
-CGROUP_MEMORY_CURRENT = Path("/sys/fs/cgroup/memory.current")
-CGROUP_MEMORY_MAX = Path("/sys/fs/cgroup/memory.max")
-MEMORY_PRESSURE_RATIO = 0.70
 # Floor for deferred refill wake when min_refill is 0 (memory-pressure skip).
 MEMORY_PRESSURE_RETRY_SECONDS = 1.0
 
@@ -79,26 +77,6 @@ def create_driver_from_fingerprint(
             remove_default_browser_check_argument=True,
         ),
     )
-
-
-def cgroup_memory_under_pressure(
-    *,
-    ratio: float = MEMORY_PRESSURE_RATIO,
-    current_path: Path = CGROUP_MEMORY_CURRENT,
-    max_path: Path = CGROUP_MEMORY_MAX,
-) -> bool:
-    """Best-effort cgroup-v2 check; False when unavailable or unlimited."""
-    try:
-        current = int(current_path.read_text().strip())
-        max_raw = max_path.read_text().strip()
-        if max_raw == "max":
-            return False
-        maximum = int(max_raw)
-        if maximum <= 0:
-            return False
-        return (current / maximum) >= ratio
-    except (OSError, ValueError):  # fmt: skip
-        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,29 +264,29 @@ class WarmDriverPool:
         while True:
             with self._lock:
                 if not self._building:
-                    if self._spare is not None:
-                        logger.info(
-                            "warm_pool_reap reason=shutdown fingerprint_hash=%s",
-                            self._spare.fingerprint.fingerprint_hash[:12],
-                        )
-                        self._close_spare_unlocked(self._spare, reason="shutdown")
-                        self._spare = None
-                    self._desired = None
-                    self._next_refill_at = 0.0
+                    self._clear_for_shutdown_unlocked()
                     return
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.01)
         with self._lock:
-            if self._spare is not None:
-                logger.info(
-                    "warm_pool_reap reason=shutdown fingerprint_hash=%s",
-                    self._spare.fingerprint.fingerprint_hash[:12],
-                )
-                self._close_spare_unlocked(self._spare, reason="shutdown")
-                self._spare = None
-            self._desired = None
-            self._next_refill_at = 0.0
+            self._clear_for_shutdown_unlocked()
+
+    def _clear_for_shutdown_unlocked(self) -> None:
+        """Requires ``_lock`` held. Reap ready spare and clear refill desire."""
+        if self._spare is not None:
+            logger.info(
+                "warm_pool_reap reason=shutdown fingerprint_hash=%s",
+                self._spare.fingerprint.fingerprint_hash[:12],
+            )
+            self._close_spare_unlocked(self._spare, reason="shutdown")
+            self._spare = None
+        self._desired = None
+        self._next_refill_at = 0.0
+
+    def has_ready_spare(self) -> bool:
+        with self._lock:
+            return self._spare is not None
 
     def _cleanup_orphan_spares(self) -> None:
         if not self._runtime_root.is_dir():
