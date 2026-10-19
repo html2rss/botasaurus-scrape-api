@@ -344,7 +344,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | :--- | :--- | :--- |
 | `SENTRY_DSN` | _(unset)_ | Project DSN (`Settings.sentry.dsn`). |
 | `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`Settings.sentry.environment`; `ENVIRONMENT` fallback). |
-| `SENTRY_RELEASE` | _(unset)_ | Release tag on events (`Settings.sentry.release`). |
+| `SENTRY_RELEASE` | image git SHA | Release tag on events (`Settings.sentry.release`). Published images bake the commit SHA via `GIT_SHA` build-arg; override at runtime if needed. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (`Settings.sentry.traces_sample_rate`; off by default). |
 | `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate (`Settings.sentry.profiles_sample_rate`). |
 | `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true` (`Settings.sentry.send_default_pii`). |

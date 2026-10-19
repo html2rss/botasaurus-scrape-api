@@ -288,7 +288,9 @@ ensure_image() {
     fail "SMOKE_SKIP_BUILD=1 but image ${IMAGE_NAME} is not present"
   fi
   echo "[smoke] Building Docker image: ${IMAGE_NAME}"
-  docker build -t "${IMAGE_NAME}" .
+  local git_sha
+  git_sha="$(git rev-parse HEAD 2>/dev/null || echo smoke-local)"
+  docker build --build-arg "GIT_SHA=${git_sha}" -t "${IMAGE_NAME}" .
 }
 
 start_scrape_container() {

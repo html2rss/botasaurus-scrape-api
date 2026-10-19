@@ -5,8 +5,11 @@ WORKDIR /build
 
 # Build wheels in an isolated stage (botasaurus dependency is sourced from git).
 # Digest-pinned Debian base; apt versions float with distro security updates.
+# Prefer HTTPS mirrors (some networks block cleartext port 80 to deb.debian.org).
 # hadolint ignore=DL3008
-RUN apt-get update \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends git \
     && rm -rf /var/lib/apt/lists/*
 
@@ -19,8 +22,11 @@ WORKDIR /app
 
 # Install minimal browser/runtime dependencies for Botasaurus.
 # Digest-pinned Debian base; apt versions float with distro security updates.
+# Prefer HTTPS mirrors (some networks block cleartext port 80 to deb.debian.org).
 # hadolint ignore=DL3008
-RUN apt-get update \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' \
+        /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         chromium \
@@ -43,6 +49,10 @@ COPY . /app
 # Keep both paths available; Botasaurus integrations often look for google-chrome.
 ENV CHROME_BIN=/usr/bin/chromium
 RUN ln -sf /usr/bin/chromium /usr/bin/google-chrome
+
+# Bake the publishing git SHA as the default Sentry release (overridable at runtime).
+ARG GIT_SHA=unknown
+ENV SENTRY_RELEASE=${GIT_SHA}
 
 # Run as unprivileged user
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \

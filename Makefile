@@ -46,8 +46,10 @@ typecheck:
 	$(PYTHON) -m pyright app tests
 
 
+GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+
 build:
-	docker build -t $(IMAGE) .
+	docker build --build-arg GIT_SHA=$(GIT_SHA) -t $(IMAGE) .
 
 serve: build
 	docker run --rm -p $(PORT):4010 \
