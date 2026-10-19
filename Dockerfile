@@ -44,6 +44,10 @@ COPY . /app
 ENV CHROME_BIN=/usr/bin/chromium
 RUN ln -sf /usr/bin/chromium /usr/bin/google-chrome
 
+# Bake the publishing git SHA as the default Sentry release (overridable at runtime).
+ARG GIT_SHA=unknown
+ENV SENTRY_RELEASE=${GIT_SHA}
+
 # Run as unprivileged user
 RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && chown -R appuser:appuser /app

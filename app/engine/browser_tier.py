@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import errno
+import logging
 import time
-from typing import cast
 from urllib.parse import urlparse
 
 from app.config import Settings
@@ -24,7 +24,7 @@ from app.engine.strategies import (
     resolve_strategies,
     wait_for_readiness,
 )
-from app.engine.warm_pool import DriverFingerprint
+from app.engine.warm_pool import DriverFingerprint, create_driver_from_fingerprint
 from app.engine.work_lease import WorkLease
 from app.infra.detector import (
     UNREADABLE_SURFACE,
@@ -32,13 +32,34 @@ from app.infra.detector import (
     ChallengeDetector,
 )
 from app.infra.metadata import MetadataExtractor, MetadataResult
+from app.infra.runtime_stats import home_is_writable, tmp_free_bytes
 from app.infra.xhr_collector import XhrCollector
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess, XhrResponse
 
 logger = get_logger()
+
+
+def _log_browser_boot_failed(
+    *,
+    request_id: str,
+    warm: bool,
+    started_monotonic: float,
+    error: object,
+) -> None:
+    log_event(
+        logger,
+        logging.WARNING,
+        "browser_boot_failed",
+        request_id=request_id,
+        warm=warm,
+        elapsed_ms=elapsed_ms(started_monotonic),
+        error=str(error),
+        home_writable=home_is_writable(),
+        tmp_free_bytes=tmp_free_bytes(),
+    )
 
 
 def _page_state(
@@ -227,8 +248,6 @@ def run_browser_tier(
     *,
     settings: Settings,
 ) -> ScrapeSuccess | ScrapeError:
-    from botasaurus.browser import Driver
-
     target_url = str(payload.url)
     request_id = session.request_id
     lease.mark(
@@ -282,31 +301,15 @@ def run_browser_tier(
                 timeout_phase=TimeoutPhase.BOOT,
             )
 
-        driver_window_size = (
-            [payload.window_size.width, payload.window_size.height]
-            if payload.window_size
-            else None
-        )
-
         try:
-            driver = cast(
-                DriverProtocol,
-                Driver(
-                    headless=payload.headless,
-                    enable_xvfb_virtual_display=not payload.headless,
-                    proxy=payload.proxy,
-                    profile=str(session.profile_dir),
-                    tiny_profile=True,
-                    block_images=payload.block_images,
-                    block_images_and_css=payload.block_images_and_css,
-                    wait_for_complete_page_load=payload.wait_for_complete_page_load,
-                    user_agent=payload.effective_user_agent,
-                    window_size=driver_window_size,
-                    lang=payload.lang,
-                    remove_default_browser_check_argument=True,
-                ),
-            )
+            driver = create_driver_from_fingerprint(fingerprint, session.profile_dir)
         except Exception as exc:
+            _log_browser_boot_failed(
+                request_id=request_id,
+                warm=False,
+                started_monotonic=started_monotonic,
+                error=exc,
+            )
             return _tier_exception_error(
                 target_url,
                 request_id=request_id,

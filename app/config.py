@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _parse_env_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+
+
+class LogFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
 
 
 class SentrySettings(BaseSettings):
@@ -43,9 +55,7 @@ class SentrySettings(BaseSettings):
     @field_validator("send_default_pii", mode="before")
     @classmethod
     def parse_bool(cls, value: object) -> bool:
-        if isinstance(value, bool):
-            return value
-        return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+        return _parse_env_bool(value)
 
     def effective_environment(self, deployment_environment: str) -> str:
         return (self.environment or deployment_environment or "production").strip()
@@ -79,6 +89,12 @@ class Settings(BaseSettings):
         ge=0,
         validation_alias="SCRAPE_PREWARM_MIN_REFILL_SECONDS",
     )
+    scrape_runtime_stats_interval_seconds: int = Field(
+        default=60,
+        ge=0,
+        validation_alias="SCRAPE_RUNTIME_STATS_INTERVAL_SECONDS",
+    )
+    log_format: LogFormat = Field(default=LogFormat.TEXT, validation_alias="LOG_FORMAT")
     runtime_root: Path = Field(default=Path("/tmp/scrape"))
     environment: str = Field(default="production", validation_alias="ENVIRONMENT")
     sentry: SentrySettings = Field(default_factory=SentrySettings)
@@ -86,9 +102,18 @@ class Settings(BaseSettings):
     @field_validator("scrape_prewarm", mode="before")
     @classmethod
     def parse_scrape_prewarm(cls, value: object) -> bool:
-        if isinstance(value, bool):
+        return _parse_env_bool(value)
+
+    @field_validator("log_format", mode="before")
+    @classmethod
+    def parse_log_format(cls, value: object) -> LogFormat:
+        if isinstance(value, LogFormat):
             return value
-        return str(value or "").strip().lower() in {"true", "1", "yes", "on"}
+        raw = str(value or LogFormat.TEXT).strip().lower()
+        try:
+            return LogFormat(raw)
+        except ValueError:
+            return LogFormat.TEXT
 
     @model_validator(mode="after")
     def validate_timeout_relationship(self) -> Settings:

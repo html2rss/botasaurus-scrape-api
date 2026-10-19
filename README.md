@@ -20,13 +20,22 @@ Docker-only FastAPI service that uses [Botasaurus](https://github.com/omkarcloud
 
 ## Quick Start (Docker Only)
 
-Run directly with Docker:
+The supported run is a hardened container: read-only root filesystem, all
+capabilities dropped, no-new-privileges, and writable tmpfs mounts for `/tmp`
+and `$HOME` (uid/gid of `appuser`). Chromium crashpad needs a writable HOME;
+request profiles live under `/tmp/scrape` on the `/tmp` tmpfs.
 
 ```bash
-docker run --rm -p 4010:4010 html2rss/botasaurus-scrape-api:latest
+docker run --rm -p 4010:4010 \
+  --init --shm-size=1gb \
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  --tmpfs /tmp:size=512m \
+  --tmpfs /home/appuser:size=128m,uid=1000,gid=1000,mode=700 \
+  --memory 2g \
+  html2rss/botasaurus-scrape-api:latest
 ```
 
-Or run from this repository directory:
+Or run from this repository directory (`make serve` uses the same hardening):
 
 ```bash
 make serve
@@ -86,7 +95,7 @@ Publish policy:
 
 ## Smoke Test
 
-Run end-to-end smoke checks (build, boot, health, scrape happy path, localhost guardrail, diagnostics, isolation):
+Run end-to-end smoke checks (build, boot, health, scrape happy path, localhost guardrail, diagnostics, isolation). Smoke containers use the same production hardening flags as the supported `docker run` above and assert no `/tmp/bota` leftover after browser scrapes.
 
 ```bash
 make smoke
@@ -335,7 +344,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | :--- | :--- | :--- |
 | `SENTRY_DSN` | _(unset)_ | Project DSN (`Settings.sentry.dsn`). |
 | `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`Settings.sentry.environment`; `ENVIRONMENT` fallback). |
-| `SENTRY_RELEASE` | _(unset)_ | Release tag on events (`Settings.sentry.release`). |
+| `SENTRY_RELEASE` | image git SHA | Release tag on events (`Settings.sentry.release`). Published images bake the commit SHA via `GIT_SHA` build-arg; override at runtime if needed. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (`Settings.sentry.traces_sample_rate`; off by default). |
 | `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate (`Settings.sentry.profiles_sample_rate`). |
 | `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true` (`Settings.sentry.send_default_pii`). |
@@ -344,6 +353,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
+| `LOG_FORMAT` | `text` | Log line format. `text` keeps `event k=v` messages (smoke greps). `json` emits one JSON object per line with `ts`, `level`, `logger`, `event_name`, `msg`, and typed fields for collectors. Each admitted scrape emits one terminal `scrape_finished` event (`request_id`, host, modes, tier, status, error_category, timeout_phase, attempts, warm_hit, render_ms, duration_ms). |
 | `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. On low-RAM hosts (for example Docker with `--memory=768m` or a 1–2 vCPU VM), use `1` or `2` to limit concurrent Chromium boots; higher values increase queue wait and swap pressure without improving wall time. |
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |
@@ -351,6 +361,7 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | `SCRAPE_PREWARM` | `false` | Opt-in single-slot Chromium prewarm. When `true`, fingerprint-matching browser scrapes reuse a spare driver built after the previous scrape. Requires **single uvicorn worker** when enabled; multi-worker deployments do not share spare state and worker restarts delete foreign `spare-*` dirs. Keep off until canary on `--shm-size=1gb` + `init: true` shows stable RSS. |
 | `SCRAPE_PREWARM_IDLE_TTL_SECONDS` | `600` | Close an unused warm spare after this many seconds. `0` disables idle reap — one Chromium remains in RAM until process exit. |
 | `SCRAPE_PREWARM_MIN_REFILL_SECONDS` | `30` | Minimum interval between spare rebuilds. |
+| `SCRAPE_RUNTIME_STATS_INTERVAL_SECONDS` | `60` | Emit a `runtime_stats` heartbeat (cgroup memory, Chromium process count, `/tmp` free bytes, runtime dirs, active requests, warm spare present). `0` disables the heartbeat. Startup always runs `runtime_preflight` (HOME writable, runtime root writable, Chromium binary present). |
 
 ## Example Calls
 

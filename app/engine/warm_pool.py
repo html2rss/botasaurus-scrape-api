@@ -12,6 +12,7 @@ not during spare build.
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 import threading
 import time
@@ -27,7 +28,8 @@ from app.engine.driver_capabilities import (
     call_quietly,
     resolve_cdp_tab,
 )
-from app.logging_config import get_logger
+from app.infra.cgroup import cgroup_memory_under_pressure, read_cgroup_memory
+from app.logging_config import get_logger, log_event
 
 if TYPE_CHECKING:
     from app.schemas.request import ScrapeRequest
@@ -37,9 +39,6 @@ logger = get_logger()
 # Set True when Docker Xvfb spike shows concurrent headless=false drivers collide.
 PREWARM_HEADLESS_ONLY = False
 
-CGROUP_MEMORY_CURRENT = Path("/sys/fs/cgroup/memory.current")
-CGROUP_MEMORY_MAX = Path("/sys/fs/cgroup/memory.max")
-MEMORY_PRESSURE_RATIO = 0.70
 # Floor for deferred refill wake when min_refill is 0 (memory-pressure skip).
 MEMORY_PRESSURE_RETRY_SECONDS = 1.0
 
@@ -69,7 +68,7 @@ def create_driver_from_fingerprint(
             enable_xvfb_virtual_display=not fingerprint.headless,
             proxy=fingerprint.proxy,
             profile=str(spare_dir),
-            tiny_profile=True,
+            tiny_profile=False,
             block_images=fingerprint.block_images,
             block_images_and_css=fingerprint.block_images_and_css,
             wait_for_complete_page_load=fingerprint.wait_for_complete_page_load,
@@ -79,26 +78,6 @@ def create_driver_from_fingerprint(
             remove_default_browser_check_argument=True,
         ),
     )
-
-
-def cgroup_memory_under_pressure(
-    *,
-    ratio: float = MEMORY_PRESSURE_RATIO,
-    current_path: Path = CGROUP_MEMORY_CURRENT,
-    max_path: Path = CGROUP_MEMORY_MAX,
-) -> bool:
-    """Best-effort cgroup-v2 check; False when unavailable or unlimited."""
-    try:
-        current = int(current_path.read_text().strip())
-        max_raw = max_path.read_text().strip()
-        if max_raw == "max":
-            return False
-        maximum = int(max_raw)
-        if maximum <= 0:
-            return False
-        return (current / maximum) >= ratio
-    except (OSError, ValueError):  # fmt: skip
-        return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +175,7 @@ class WarmDriverPool:
         self._building = False
         self._building_dir: Path | None = None
         self._adopted_dirs: set[Path] = set()
+        self._memory_pressure_active = False
 
         self._cleanup_orphan_spares()
         self._thread = threading.Thread(
@@ -286,29 +266,29 @@ class WarmDriverPool:
         while True:
             with self._lock:
                 if not self._building:
-                    if self._spare is not None:
-                        logger.info(
-                            "warm_pool_reap reason=shutdown fingerprint_hash=%s",
-                            self._spare.fingerprint.fingerprint_hash[:12],
-                        )
-                        self._close_spare_unlocked(self._spare, reason="shutdown")
-                        self._spare = None
-                    self._desired = None
-                    self._next_refill_at = 0.0
+                    self._clear_for_shutdown_unlocked()
                     return
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.01)
         with self._lock:
-            if self._spare is not None:
-                logger.info(
-                    "warm_pool_reap reason=shutdown fingerprint_hash=%s",
-                    self._spare.fingerprint.fingerprint_hash[:12],
-                )
-                self._close_spare_unlocked(self._spare, reason="shutdown")
-                self._spare = None
-            self._desired = None
-            self._next_refill_at = 0.0
+            self._clear_for_shutdown_unlocked()
+
+    def _clear_for_shutdown_unlocked(self) -> None:
+        """Requires ``_lock`` held. Reap ready spare and clear refill desire."""
+        if self._spare is not None:
+            logger.info(
+                "warm_pool_reap reason=shutdown fingerprint_hash=%s",
+                self._spare.fingerprint.fingerprint_hash[:12],
+            )
+            self._close_spare_unlocked(self._spare, reason="shutdown")
+            self._spare = None
+        self._desired = None
+        self._next_refill_at = 0.0
+
+    def has_ready_spare(self) -> bool:
+        with self._lock:
+            return self._spare is not None
 
     def _cleanup_orphan_spares(self) -> None:
         if not self._runtime_root.is_dir():
@@ -367,6 +347,20 @@ class WarmDriverPool:
     def _schedule_deferred_refill(self, not_before: float) -> None:
         self._next_refill_at = not_before
 
+    def _note_memory_pressure(self, *, active: bool) -> None:
+        """Emit entered/cleared once per transition (not once per skipped refill)."""
+        if active == self._memory_pressure_active:
+            return
+        self._memory_pressure_active = active
+        mem_ratio = read_cgroup_memory().ratio
+        log_event(
+            logger,
+            logging.INFO,
+            "memory_pressure",
+            state="entered" if active else "cleared",
+            mem_ratio=None if mem_ratio is None else round(mem_ratio, 4),
+        )
+
     def _maybe_reap_stale_spare(self, desired: DriverFingerprint) -> None:
         """Requires ``_lock`` held. Drop ready spare when it no longer matches desired."""
         spare = self._spare
@@ -403,10 +397,11 @@ class WarmDriverPool:
                 )
                 return
             if self._memory_pressure():
-                logger.info("warm_pool_refill skipped=memory_pressure")
+                self._note_memory_pressure(active=True)
                 delay = max(self._min_refill_seconds, MEMORY_PRESSURE_RETRY_SECONDS)
                 self._schedule_deferred_refill(now + delay)
                 return
+            self._note_memory_pressure(active=False)
             self._building = True
             self._next_refill_at = 0.0
             fingerprint = desired

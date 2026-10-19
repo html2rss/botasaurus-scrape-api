@@ -46,11 +46,19 @@ typecheck:
 	$(PYTHON) -m pyright app tests
 
 
+GIT_SHA ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+
 build:
-	docker build -t $(IMAGE) .
+	docker build --build-arg GIT_SHA=$(GIT_SHA) -t $(IMAGE) .
 
 serve: build
-	docker run --rm -p $(PORT):4010 $(IMAGE)
+	docker run --rm -p $(PORT):4010 \
+		--init --shm-size=1gb \
+		--read-only --cap-drop ALL --security-opt no-new-privileges:true \
+		--tmpfs /tmp:size=512m \
+		--tmpfs /home/appuser:size=128m,uid=1000,gid=1000,mode=700 \
+		--memory 2g \
+		$(IMAGE)
 
 health:
 	curl -s $(BASE_URL)/health

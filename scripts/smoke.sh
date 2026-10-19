@@ -288,15 +288,31 @@ ensure_image() {
     fail "SMOKE_SKIP_BUILD=1 but image ${IMAGE_NAME} is not present"
   fi
   echo "[smoke] Building Docker image: ${IMAGE_NAME}"
-  docker build -t "${IMAGE_NAME}" .
+  local git_sha
+  git_sha="$(git rev-parse HEAD 2>/dev/null || echo smoke-local)"
+  docker build --build-arg "GIT_SHA=${git_sha}" -t "${IMAGE_NAME}" .
 }
 
 start_scrape_container() {
+  # Production hardening is the only supported smoke path (read-only root,
+  # dropped caps, uid-owned HOME tmpfs). Unhardened runs hid Chromium crashpad
+  # and tiny_profile cwd writes that break under these flags.
   local -a run_args=(
     -d
     --name "${CONTAINER_NAME}"
     --init
     --shm-size=1gb
+    --read-only
+    --cap-drop
+    ALL
+    --security-opt
+    no-new-privileges:true
+    --tmpfs
+    /tmp:size=512m
+    --tmpfs
+    /home/appuser:size=128m,uid=1000,gid=1000,mode=700
+    --memory
+    2g
     -p "${HOST_PORT}:${CONTAINER_PORT}"
   )
   local arg
@@ -306,6 +322,16 @@ start_scrape_container() {
   echo "[smoke] Starting container: ${CONTAINER_NAME}"
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   docker run "${run_args[@]}" "${IMAGE_NAME}" >/dev/null
+}
+
+assert_no_tmp_bota() {
+  echo "[smoke] Asserting no /tmp/bota leftover after browser scrape"
+  if docker exec "${CONTAINER_NAME}" test -e /tmp/bota; then
+    fail "/tmp/bota exists after browser scrape (profile leak outside runtime root)"
+  fi
+  local tmp_usage
+  tmp_usage="$(docker exec "${CONTAINER_NAME}" df -h /tmp | tail -n1 || true)"
+  echo "[smoke] /tmp usage after browser scrape: ${tmp_usage}"
 }
 
 start_sentry_sidecar() {
@@ -433,6 +459,7 @@ run_contract_prewarm_off() {
   scroll_code="$(echo "$scroll_response" | tail -n1)"
   [[ "$scroll_code" == "200" ]] || fail "Expected scroll scrape 200, got ${scroll_code}"
   assert_json_key_equals "$scroll_body" "diagnostics.execution_tier" "browser_driver" || fail "Expected execution_tier=browser_driver for scroll"
+  assert_no_tmp_bota
 
   assert_sentry_initialized
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
@@ -477,6 +504,7 @@ run_prewarm_on_warm_handoff() {
   warm_logs="$(docker logs "${CONTAINER_NAME}" 2>&1)"
   echo "$warm_logs" | grep -E "scrape_boot .*warm_hit=True" >/dev/null \
     || fail "Expected scrape_boot warm_hit=True after warm handoff"
+  assert_no_tmp_bota
 
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1 || true
   echo "[smoke] Profile prewarm-on-warm-handoff PASS"
