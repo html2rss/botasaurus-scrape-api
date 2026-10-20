@@ -44,6 +44,17 @@ class HealthAccessFilter(logging.Filter):
         return not ('"GET /health' in message or "GET /health " in message)
 
 
+class WebsocketTeardownFilter(logging.Filter):
+    """Drop websocket logger records (TTL-reap Chromium teardown goodbye).
+
+    Mirrors the Sentry ``before_send`` drop for ``logger=websocket`` so
+    ``Connection to remote host was lost. - goodbye`` is not an OpenObserve error.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return False
+
+
 class TextFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         ts = datetime.fromtimestamp(record.created, tz=UTC).strftime(
@@ -97,6 +108,11 @@ def setup_logging(
         uv_logger.handlers.clear()
         uv_logger.propagate = True
         uv_logger.addFilter(health_filter)
+
+    websocket_logger = logging.getLogger("websocket")
+    websocket_logger.handlers.clear()
+    websocket_logger.propagate = True
+    websocket_logger.addFilter(WebsocketTeardownFilter())
 
     logger = get_logger()
     logger.setLevel(level)

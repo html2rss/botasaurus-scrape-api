@@ -146,14 +146,15 @@ def _surface_unclean(
     assessment: ChallengeAssessment,
 ) -> ScrapeError:
     """Fail closed: any unclean assessment is challenge_block (no soft-retry)."""
-    logger.warning(
-        "scrape_challenge_detected request_id=%s host=%s strategy=%s "
-        "attempt=%d marker=%s",
-        request_id,
-        urlparse(target_url).hostname,
-        strategy.value,
-        attempts,
-        assessment.detected_marker,
+    log_event(
+        logger,
+        logging.WARNING,
+        "scrape_challenge_detected",
+        request_id=request_id,
+        host=urlparse(target_url).hostname,
+        strategy=strategy.value,
+        attempt=attempts,
+        marker=assessment.detected_marker,
     )
     return _challenge_block_error(
         target_url,
