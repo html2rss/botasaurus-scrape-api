@@ -13,6 +13,7 @@ from app.logging_config import (
     LOGGER_NAME,
     HealthAccessFilter,
     JsonFormatter,
+    WebsocketTeardownFilter,
     log_event,
     setup_logging,
 )
@@ -23,7 +24,13 @@ class LoggingConfigTests(unittest.TestCase):
         reset_settings_cache()
         root = logging.getLogger()
         root.handlers.clear()
-        for name in (LOGGER_NAME, "uvicorn", "uvicorn.access", "uvicorn.error"):
+        for name in (
+            LOGGER_NAME,
+            "uvicorn",
+            "uvicorn.access",
+            "uvicorn.error",
+            "websocket",
+        ):
             logging.getLogger(name).handlers.clear()
             logging.getLogger(name).filters.clear()
 
@@ -102,6 +109,48 @@ class LoggingConfigTests(unittest.TestCase):
         )
         self.assertTrue(filt.filter(kept))
         self.assertFalse(filt.filter(dropped))
+
+    def test_websocket_teardown_filter_drops_all_websocket_logger_records(self) -> None:
+        # Mirrors Sentry before_send: drop every record on logger name "websocket",
+        # not only Chromium TTL-reap goodbye lines.
+        filt = WebsocketTeardownFilter()
+        for msg in (
+            "Connection to remote host was lost. - goodbye",
+            "Websocket connected",
+            "unexpected websocket diagnostic",
+        ):
+            record = logging.LogRecord(
+                name="websocket",
+                level=logging.ERROR,
+                pathname=__file__,
+                lineno=1,
+                msg=msg,
+                args=(),
+                exc_info=None,
+            )
+            self.assertFalse(filt.filter(record), msg=msg)
+
+    def test_setup_logging_attaches_websocket_filter(self) -> None:
+        setup_logging(log_format="text")
+        websocket_logger = logging.getLogger("websocket")
+        self.assertTrue(
+            any(
+                isinstance(f, WebsocketTeardownFilter) for f in websocket_logger.filters
+            )
+        )
+        stream = io.StringIO()
+        root = logging.getLogger()
+        handler = logging.StreamHandler(stream)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(handler)
+        try:
+            websocket_logger.error("Connection to remote host was lost. - goodbye")
+            websocket_logger.error("unexpected websocket diagnostic")
+        finally:
+            root.removeHandler(handler)
+        out = stream.getvalue()
+        self.assertNotIn("goodbye", out)
+        self.assertNotIn("unexpected websocket diagnostic", out)
 
     def test_settings_log_format_defaults_to_text(self) -> None:
         reset_settings_cache()

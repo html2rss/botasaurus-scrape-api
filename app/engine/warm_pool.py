@@ -236,10 +236,13 @@ class WarmDriverPool:
             return None
 
         age_s = self._clock() - spare.created_at
-        logger.info(
-            "warm_pool_state present=false age_s=%.1f fingerprint_hash=%s",
-            age_s,
-            fingerprint.fingerprint_hash[:12],
+        log_event(
+            logger,
+            logging.INFO,
+            "warm_pool_state",
+            present="false",
+            age_s=round(age_s, 1),
+            fingerprint_hash=fingerprint.fingerprint_hash[:12],
         )
         return spare.driver, spare.spare_dir
 
@@ -277,9 +280,12 @@ class WarmDriverPool:
     def _clear_for_shutdown_unlocked(self) -> None:
         """Requires ``_lock`` held. Reap ready spare and clear refill desire."""
         if self._spare is not None:
-            logger.info(
-                "warm_pool_reap reason=shutdown fingerprint_hash=%s",
-                self._spare.fingerprint.fingerprint_hash[:12],
+            log_event(
+                logger,
+                logging.INFO,
+                "warm_pool_reap",
+                reason="shutdown",
+                fingerprint_hash=self._spare.fingerprint.fingerprint_hash[:12],
             )
             self._close_spare_unlocked(self._spare, reason="shutdown")
             self._spare = None
@@ -296,7 +302,12 @@ class WarmDriverPool:
         for entry in self._runtime_root.iterdir():
             if entry.is_dir() and entry.name.startswith("spare-"):
                 shutil.rmtree(entry, ignore_errors=True)
-                logger.info("warm_pool_orphan_spare_removed path=%s", entry)
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "warm_pool_orphan_spare_removed",
+                    path=str(entry),
+                )
 
     def _refill_loop(self) -> None:
         while not self._stop.is_set():
@@ -336,10 +347,13 @@ class WarmDriverPool:
             age = self._clock() - spare.created_at
             if age < self._idle_ttl_seconds:
                 return
-            logger.info(
-                "warm_pool_reap reason=ttl fingerprint_hash=%s age_s=%.1f",
-                spare.fingerprint.fingerprint_hash[:12],
-                age,
+            log_event(
+                logger,
+                logging.INFO,
+                "warm_pool_reap",
+                reason="ttl",
+                fingerprint_hash=spare.fingerprint.fingerprint_hash[:12],
+                age_s=round(age, 1),
             )
             self._close_spare_unlocked(spare, reason="ttl")
             self._spare = None
@@ -366,9 +380,12 @@ class WarmDriverPool:
         spare = self._spare
         if spare is None or spare.fingerprint == desired:
             return
-        logger.info(
-            "warm_pool_reap reason=stale_fingerprint fingerprint_hash=%s",
-            spare.fingerprint.fingerprint_hash[:12],
+        log_event(
+            logger,
+            logging.INFO,
+            "warm_pool_reap",
+            reason="stale_fingerprint",
+            fingerprint_hash=spare.fingerprint.fingerprint_hash[:12],
         )
         self._close_spare_unlocked(spare, reason="stale_fingerprint")
         self._spare = None
@@ -426,19 +443,28 @@ class WarmDriverPool:
                     created_at=self._clock(),
                 )
                 driver = None
-                logger.info(
-                    "warm_pool_refill fingerprint_hash=%s present=true",
-                    fingerprint.fingerprint_hash[:12],
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "warm_pool_refill",
+                    fingerprint_hash=fingerprint.fingerprint_hash[:12],
+                    present="true",
                 )
-                logger.info(
-                    "warm_pool_state present=true age_s=0.0 fingerprint_hash=%s",
-                    fingerprint.fingerprint_hash[:12],
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "warm_pool_state",
+                    present="true",
+                    age_s=0.0,
+                    fingerprint_hash=fingerprint.fingerprint_hash[:12],
                 )
         except Exception as exc:
-            logger.warning(
-                "warm_pool_refill_failed fingerprint_hash=%s error=%s",
-                fingerprint.fingerprint_hash[:12],
-                exc,
+            log_event(
+                logger,
+                logging.WARNING,
+                "warm_pool_refill_failed",
+                fingerprint_hash=fingerprint.fingerprint_hash[:12],
+                error=str(exc),
             )
             if driver is not None:
                 self._close_driver(driver)
@@ -454,20 +480,24 @@ class WarmDriverPool:
         try:
             return self._health_check(driver)
         except Exception as exc:
-            logger.warning(
-                "warm_pool_health_probe_failed fingerprint_hash=%s error=%s",
-                fingerprint_hash,
-                type(exc).__name__,
+            log_event(
+                logger,
+                logging.WARNING,
+                "warm_pool_health_probe_failed",
+                fingerprint_hash=fingerprint_hash,
+                error=type(exc).__name__,
             )
             return None
 
     def _abort_adopted_take(self, spare: _SpareSlot, *, reason: str) -> None:
         """Requires ``_lock`` held. Single path for failed health probes."""
         self._adopted_dirs.discard(spare.spare_dir)
-        logger.info(
-            "warm_pool_reap reason=%s fingerprint_hash=%s",
-            reason,
-            spare.fingerprint.fingerprint_hash[:12],
+        log_event(
+            logger,
+            logging.INFO,
+            "warm_pool_reap",
+            reason=reason,
+            fingerprint_hash=spare.fingerprint.fingerprint_hash[:12],
         )
         self._close_spare_unlocked(spare, reason=reason)
 
