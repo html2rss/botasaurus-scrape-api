@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -14,7 +15,7 @@ from app.engine.budget import (
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.work_lease import WorkLease
 from app.infra.detector import ChallengeDetector
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import ScrapeError, ScrapeSuccess
@@ -98,25 +99,27 @@ def run_request_tier(
         if payload.execution_mode == ExecutionMode.AUTO and not is_clean_success:
             remaining = remaining_total_seconds(settings, started_monotonic)
             if remaining >= MIN_ESCALATE_REMAINING_SECONDS:
-                logger.info(
-                    "request_tier_escalating request_id=%s host=%s status=%d "
-                    "blocked=%s challenge=%s remaining=%d",
-                    request_id,
-                    urlparse(target_url).hostname,
-                    status_code,
-                    assessment.blocked_detected,
-                    assessment.challenge_detected,
-                    remaining,
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "request_tier_escalating",
+                    request_id=request_id,
+                    host=urlparse(target_url).hostname,
+                    status=status_code,
+                    blocked=assessment.blocked_detected,
+                    challenge=assessment.challenge_detected,
+                    remaining=remaining,
                 )
                 return None
             if not assessment.is_clean:
-                logger.info(
-                    "request_tier_skip_escalate_challenge request_id=%s host=%s "
-                    "remaining=%d marker=%s",
-                    request_id,
-                    urlparse(target_url).hostname,
-                    remaining,
-                    assessment.detected_marker,
+                log_event(
+                    logger,
+                    logging.INFO,
+                    "request_tier_skip_escalate_challenge",
+                    request_id=request_id,
+                    host=urlparse(target_url).hostname,
+                    remaining=remaining,
+                    marker=assessment.detected_marker,
                 )
                 return build_error(
                     target_url,
@@ -128,12 +131,14 @@ def run_request_tier(
                     execution_tier=ExecutionTier.HTTP_REQUEST,
                     assessment=assessment,
                 )
-            logger.info(
-                "request_tier_skip_escalate request_id=%s host=%s status=%d remaining=%d",
-                request_id,
-                urlparse(target_url).hostname,
-                status_code,
-                remaining,
+            log_event(
+                logger,
+                logging.INFO,
+                "request_tier_skip_escalate",
+                request_id=request_id,
+                host=urlparse(target_url).hostname,
+                status=status_code,
+                remaining=remaining,
             )
 
         if assessment.blocked_detected:

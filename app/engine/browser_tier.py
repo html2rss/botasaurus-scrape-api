@@ -326,11 +326,13 @@ def run_browser_tier(
     session.warm_hit = warm_hit
     lease.set_warm_hit(warm_hit)
     boot_ms = int((time.monotonic() - boot_started) * 1000)
-    logger.info(
-        "scrape_boot request_id=%s warm_hit=%s boot_ms=%d",
-        request_id,
-        warm_hit,
-        boot_ms,
+    log_event(
+        logger,
+        logging.INFO,
+        "scrape_boot",
+        request_id=request_id,
+        warm_hit=warm_hit,
+        boot_ms=boot_ms,
     )
 
     strategies = resolve_strategies(payload.navigation_mode, payload.max_retries)
@@ -416,15 +418,16 @@ def run_browser_tier(
                 xhr_responses=xhr_responses,
             )
         except Exception as exc:
-            logger.warning(
-                "scrape_attempt_failed request_id=%s host=%s mode=%s strategy=%s "
-                "attempt=%d error=%s",
-                request_id,
-                urlparse(target_url).hostname,
-                payload.navigation_mode,
-                strategy.value,
-                attempt_index,
-                str(exc),
+            log_event(
+                logger,
+                logging.WARNING,
+                "scrape_attempt_failed",
+                request_id=request_id,
+                host=urlparse(target_url).hostname,
+                mode=str(payload.navigation_mode),
+                strategy=strategy.value,
+                attempt=attempt_index,
+                error=str(exc),
             )
             assessment = _inspect_assessment(driver)
             if assessment is None or not assessment.is_clean:

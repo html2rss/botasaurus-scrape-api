@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 
 logger = get_logger()
 
@@ -41,7 +42,13 @@ def prune_orphan_runtime_dirs(
         try:
             shutil.rmtree(entry)
             removed += 1
-            logger.info("runtime_dir_pruned path=%s", entry)
+            log_event(logger, logging.INFO, "runtime_dir_pruned", path=str(entry))
         except OSError as exc:
-            logger.warning("runtime_dir_prune_failed path=%s error=%s", entry, exc)
+            log_event(
+                logger,
+                logging.WARNING,
+                "runtime_dir_prune_failed",
+                path=str(entry),
+                error=str(exc),
+            )
     return removed
