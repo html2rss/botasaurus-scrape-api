@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TypedDict, cast
 from urllib.parse import urlparse
 
@@ -10,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import Response
 
 from app.infra.request_id import resolve_request_id
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.response import ScrapeError, ScrapeSuccess, validation_error
 
 logger = get_logger()
@@ -76,10 +77,12 @@ async def request_schema_validation_handler(
         request.headers.get("X-Request-Id"),
         host=urlparse(url).hostname if url else None,
     )
-    logger.info(
-        "request_schema_422 host=%s field=%s",
-        urlparse(url).hostname if url else None,
-        field,
+    log_event(
+        logger,
+        logging.INFO,
+        "request_schema_422",
+        host=urlparse(url).hostname if url else None,
+        field=field,
     )
     return json_response(
         validation_error(

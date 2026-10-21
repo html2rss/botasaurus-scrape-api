@@ -61,8 +61,8 @@ class RequestSchemaTests(unittest.TestCase):
         log_text = "\n".join(captured.output)
         self.assertIn("host=example.com", log_text)
         self.assertIn("field=wait_timeout_seconds", log_text)
-        self.assertIn("from=35", log_text)
-        self.assertIn("to=30", log_text)
+        self.assertIn("original=35", log_text)
+        self.assertIn("clamped=30", log_text)
 
     def test_wait_timeout_seconds_clamps_below_one(self) -> None:
         with self.assertLogs("botasaurus_scrape_api", level="INFO") as captured:
@@ -71,8 +71,8 @@ class RequestSchemaTests(unittest.TestCase):
         self.assertEqual(payload.wait_timeout_seconds, 1)
         log_text = "\n".join(captured.output)
         self.assertIn("field=wait_timeout_seconds", log_text)
-        self.assertIn("from=0", log_text)
-        self.assertIn("to=1", log_text)
+        self.assertIn("original=0", log_text)
+        self.assertIn("clamped=1", log_text)
 
     def test_clamped_wait_timeout_preserves_clamped_value(self) -> None:
         payload = scrape_request(

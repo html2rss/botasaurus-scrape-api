@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -21,7 +22,7 @@ from app.infra.runtime_cleanup import (
     prune_orphan_runtime_dirs,
     runtime_root_low_on_space,
 )
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.enums import (
     ErrorCategory,
     ExecutionMode,
@@ -83,7 +84,12 @@ class ScraperEngine:
             self.runtime_root,
             min_free_bytes=self.settings.scrape_runtime_min_free_bytes,
         ):
-            logger.info("runtime_root_low_on_space path=%s", self.runtime_root)
+            log_event(
+                logger,
+                logging.INFO,
+                "runtime_root_low_on_space",
+                path=str(self.runtime_root),
+            )
         self.prune_runtime_dirs()
         self.runtime_root.mkdir(parents=True, exist_ok=True)
 
@@ -157,11 +163,13 @@ class ScraperEngine:
                             warm_fp = session.warm_fingerprint
                             return request_result
                     except Exception as exc:
-                        logger.info(
-                            "request_tier_failed request_id=%s host=%s error=%s",
-                            resolved_request_id,
-                            urlparse(target_url).hostname,
-                            str(exc),
+                        log_event(
+                            logger,
+                            logging.INFO,
+                            "request_tier_failed",
+                            request_id=resolved_request_id,
+                            host=urlparse(target_url).hostname,
+                            error=str(exc),
                         )
                         if payload.execution_mode == ExecutionMode.REQUEST:
                             render_ms = elapsed_ms(started_monotonic)

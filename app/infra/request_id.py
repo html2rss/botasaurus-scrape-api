@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import uuid
 
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 
 logger = get_logger()
 
@@ -25,7 +26,7 @@ def resolve_request_id(inbound: str | None, *, host: str | None = None) -> str:
         return candidate
 
     reason = "absent" if not candidate else "invalid"
-    logger.info("request_id_fallback host=%s reason=%s", host, reason)
+    log_event(logger, logging.INFO, "request_id_fallback", host=host, reason=reason)
     return str(uuid.uuid4())
 
 

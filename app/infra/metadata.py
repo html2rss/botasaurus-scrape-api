@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from typing import cast
 
@@ -12,7 +13,7 @@ from app.infra.cdp_types import (
     CdpPerformanceLogEntry,
     CdpResponseReceivedMessage,
 )
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 
 logger = get_logger()
 
@@ -124,7 +125,7 @@ class MetadataExtractor:
                         metadata_error=None,
                     )
         except Exception as exc:
-            logger.warning("metadata_fetch_error error=%s", str(exc))
+            log_event(logger, logging.WARNING, "metadata_fetch_error", error=str(exc))
 
         return MetadataResult(
             status_code=200,

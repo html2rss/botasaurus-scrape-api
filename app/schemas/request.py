@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ from pydantic import (
 )
 
 from app.config import get_settings
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.enums import ExecutionMode, NavigationMode
 
 logger = get_logger()
@@ -186,12 +187,14 @@ class ScrapeRequest(BaseModel):
         clamped = max(1, min(numeric, get_settings().scrape_work_timeout_seconds))
         if clamped != numeric:
             url = info.data.get("url")
-            logger.info(
-                "request_field_clamped host=%s field=%s from=%s to=%s",
-                urlparse(str(url)).hostname if url else None,
-                "wait_timeout_seconds",
-                numeric,
-                clamped,
+            log_event(
+                logger,
+                logging.INFO,
+                "request_field_clamped",
+                host=urlparse(str(url)).hostname if url else None,
+                field="wait_timeout_seconds",
+                original=numeric,
+                clamped=clamped,
             )
         return clamped
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol, TypedDict, cast
 
 from app.config import SentrySettings, Settings
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 
 logger = get_logger()
 
@@ -72,8 +73,11 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.starlette import StarletteIntegration
     except ImportError:
-        logger.warning(
-            "sentry_sdk_import_failed SENTRY_DSN is set but sentry-sdk package is not available"
+        log_event(
+            logger,
+            logging.WARNING,
+            "sentry_sdk_import_failed",
+            message="SENTRY_DSN is set but sentry-sdk package is not available",
         )
         return False
 
@@ -97,11 +101,13 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
     sentry_sdk.init(**init_kwargs)
     _initialized = True
 
-    logger.info(
-        "sentry_initialized environment=%s release=%s traces_sample_rate=%.2f",
-        sentry.effective_environment(deployment_environment),
-        sentry.release or None,
-        sentry.traces_sample_rate,
+    log_event(
+        logger,
+        logging.INFO,
+        "sentry_initialized",
+        environment=sentry.effective_environment(deployment_environment),
+        release=sentry.release or None,
+        traces_sample_rate=sentry.traces_sample_rate,
     )
     return True
 

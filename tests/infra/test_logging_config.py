@@ -177,6 +177,21 @@ class LoggingConfigTests(unittest.TestCase):
             settings = Settings()
             self.assertEqual(settings.log_format, LogFormat.TEXT)
 
+    def test_app_has_no_info_warning_event_format_strings(self) -> None:
+        """Ratchet: info/warning events must use log_event so JSON gets event_name."""
+        import re
+        from pathlib import Path
+
+        app_root = Path(__file__).resolve().parents[2] / "app"
+        pattern = re.compile(r'logger\.(?:info|warning)\(\s*\n?\s*["\'][a-z0-9_]+')
+        offenders: list[str] = []
+        for path in app_root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            for match in pattern.finditer(text):
+                line_no = text.count("\n", 0, match.start()) + 1
+                offenders.append(f"{path.relative_to(app_root.parent)}:{line_no}")
+        self.assertEqual(offenders, [])
+
 
 if __name__ == "__main__":
     unittest.main()
