@@ -4,11 +4,8 @@ from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from app.constants import SERVICE_NAME
-from app.logging_config import get_logger
 from app.schemas.enums import ErrorCategory
 from app.schemas.response import ScrapeError
-
-logger = get_logger()
 
 
 class SentryScope(Protocol):
