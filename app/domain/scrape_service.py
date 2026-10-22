@@ -84,6 +84,34 @@ def _emit_scrape_finished(
     )
 
 
+def _finish_outcome(
+    *,
+    payload: ScrapeRequest,
+    host: str,
+    body: ScrapeSuccess | ScrapeError,
+    status_code: int,
+    lease: WorkLease,
+    started_monotonic: float,
+) -> ScrapeOutcome:
+    """Shared terminal path: lease snapshot, ops telemetry, scrape_finished, outcome."""
+    snapshot = lease.snapshot()
+    if isinstance(body, ScrapeError):
+        emit_terminal_telemetry(
+            body,
+            http_status=status_code,
+            warm_hit=snapshot.warm_hit,
+        )
+    _emit_scrape_finished(
+        payload=payload,
+        host=host,
+        body=body,
+        status_code=status_code,
+        snapshot=snapshot,
+        started_monotonic=started_monotonic,
+    )
+    return ScrapeOutcome(body=body, status_code=status_code)
+
+
 class ScrapeService:
     """Owns request-id resolution, URL guardrails, WorkLease execution, status mapping."""
 
@@ -186,63 +214,42 @@ class ScrapeService:
                 ),
             )
         except RequestIdCollisionError:
-            collision_result = ScrapeError(
-                url=target_url,
-                error="Request id collision detected",
-                error_category=ErrorCategory.NAVIGATION_ERROR,
-                diagnostics=ScrapeDiagnostics(
-                    request_id=request_id,
-                    attempts=0,
-                    render_ms=0,
+            return _finish_outcome(
+                payload=payload,
+                host=host,
+                body=ScrapeError(
+                    url=target_url,
+                    error="Request id collision detected",
+                    error_category=ErrorCategory.NAVIGATION_ERROR,
+                    diagnostics=ScrapeDiagnostics(
+                        request_id=request_id,
+                        attempts=0,
+                        render_ms=0,
+                    ),
                 ),
-            )
-            emit_terminal_telemetry(collision_result, http_status=502)
-            snapshot = lease.snapshot()
-            _emit_scrape_finished(
-                payload=payload,
-                host=host,
-                body=collision_result,
                 status_code=502,
-                snapshot=snapshot,
+                lease=lease,
                 started_monotonic=started_monotonic,
             )
-            return ScrapeOutcome(body=collision_result, status_code=502)
         except TimeoutError:
-            timeout_result = lease.timeout_error(
-                target_url,
-                request_id=request_id,
-                started_monotonic=started_monotonic,
-            )
-            snapshot = lease.snapshot()
-            emit_terminal_telemetry(
-                timeout_result,
-                http_status=504,
-                warm_hit=snapshot.warm_hit,
-            )
-            _emit_scrape_finished(
+            return _finish_outcome(
                 payload=payload,
                 host=host,
-                body=timeout_result,
+                body=lease.timeout_error(
+                    target_url,
+                    request_id=request_id,
+                    started_monotonic=started_monotonic,
+                ),
                 status_code=504,
-                snapshot=snapshot,
+                lease=lease,
                 started_monotonic=started_monotonic,
             )
-            return ScrapeOutcome(body=timeout_result, status_code=504)
 
-        status_code = 200 if isinstance(result, ScrapeSuccess) else 502
-        snapshot = lease.snapshot()
-        if isinstance(result, ScrapeError):
-            emit_terminal_telemetry(
-                result,
-                http_status=status_code,
-                warm_hit=snapshot.warm_hit,
-            )
-        _emit_scrape_finished(
+        return _finish_outcome(
             payload=payload,
             host=host,
             body=result,
-            status_code=status_code,
-            snapshot=snapshot,
+            status_code=200 if isinstance(result, ScrapeSuccess) else 502,
+            lease=lease,
             started_monotonic=started_monotonic,
         )
-        return ScrapeOutcome(body=result, status_code=status_code)
