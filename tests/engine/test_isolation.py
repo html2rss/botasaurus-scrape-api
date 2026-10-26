@@ -1,7 +1,5 @@
 """Engine singleton and per-request isolation regression tests."""
 
-from __future__ import annotations
-
 import tempfile
 import threading
 import unittest

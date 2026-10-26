@@ -1,7 +1,5 @@
 """Application-specific exceptions with stable semantics across layers."""
 
-from __future__ import annotations
-
 
 class BotasaurusScrapeError(Exception):
     """Base class for domain errors that map to scrape envelopes."""

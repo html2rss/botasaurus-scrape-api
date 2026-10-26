@@ -1,7 +1,5 @@
 """Tests for runtime preflight probes and stats heartbeat snapshot."""
 
-from __future__ import annotations
-
 import io
 import json
 import logging
@@ -27,8 +25,8 @@ class CgroupTests(unittest.TestCase):
             root = Path(tmp)
             current = root / "memory.current"
             maximum = root / "memory.max"
-            current.write_text("70", encoding="utf-8")
-            maximum.write_text("100", encoding="utf-8")
+            current.write_text("70")
+            maximum.write_text("100")
             snap = read_cgroup_memory(current_path=current, max_path=maximum)
             self.assertEqual(snap.current, 70)
             self.assertEqual(snap.maximum, 100)
@@ -40,8 +38,8 @@ class CgroupTests(unittest.TestCase):
             root = Path(tmp)
             current = root / "memory.current"
             maximum = root / "memory.max"
-            current.write_text("1", encoding="utf-8")
-            maximum.write_text("max", encoding="utf-8")
+            current.write_text("1")
+            maximum.write_text("max")
             snap = read_cgroup_memory(current_path=current, max_path=maximum)
             self.assertIsNone(snap.maximum)
             self.assertIsNone(snap.ratio)
@@ -53,11 +51,11 @@ class RuntimeStatsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "1").mkdir()
-            (root / "1" / "comm").write_text("chromium\n", encoding="utf-8")
+            (root / "1" / "comm").write_text("chromium\n")
             (root / "2").mkdir()
-            (root / "2" / "comm").write_text("python3\n", encoding="utf-8")
+            (root / "2" / "comm").write_text("python3\n")
             (root / "3").mkdir()
-            (root / "3" / "comm").write_text("chrome\n", encoding="utf-8")
+            (root / "3" / "comm").write_text("chrome\n")
             self.assertEqual(count_chromium_procs(proc_root=root), 2)
 
     def test_home_writable_and_preflight_ok(self) -> None:

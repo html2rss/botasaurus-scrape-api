@@ -1,7 +1,5 @@
 """Typed optional-driver method adapter for Botasaurus Driver seams."""
 
-from __future__ import annotations
-
 from typing import Any, Protocol, overload, runtime_checkable
 
 from app.logging_config import get_logger

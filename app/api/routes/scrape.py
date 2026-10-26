@@ -1,7 +1,5 @@
 """Scrape endpoint routes."""
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Header
 from fastapi.responses import Response
 

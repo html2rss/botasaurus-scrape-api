@@ -1,7 +1,5 @@
 """Parity tests for the single scrape_finished terminal log event."""
 
-from __future__ import annotations
-
 import io
 import json
 import logging

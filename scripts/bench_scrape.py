@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Time POST /scrape happy path and print wall-time percentiles."""
 
-from __future__ import annotations
-
 import argparse
 import statistics
 import time

@@ -1,7 +1,5 @@
 """App-factory lifespan coverage for SCRAPE_PREWARM flag attach."""
 
-from __future__ import annotations
-
 import unittest
 from typing import Any
 from unittest.mock import patch

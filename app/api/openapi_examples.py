@@ -1,7 +1,5 @@
 """OpenAPI response examples built from Pydantic model instances."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from app.constants import SERVICE_NAME

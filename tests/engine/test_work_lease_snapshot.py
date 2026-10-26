@@ -1,7 +1,5 @@
 """WorkLease phase snapshot unit tests (folded from ScrapeProgress)."""
 
-from __future__ import annotations
-
 import unittest
 
 from app.engine.work_lease import LeaseSnapshot, WorkLease

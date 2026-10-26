@@ -1,7 +1,5 @@
 """Success and error envelope builders plus HTML normalization."""
 
-from __future__ import annotations
-
 from app.infra.detector import ChallengeAssessment
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
 from app.schemas.response import (

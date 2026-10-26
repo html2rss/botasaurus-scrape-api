@@ -1,7 +1,5 @@
 """ScrapeSession force_close and abort-before-enter reclaim honesty."""
 
-from __future__ import annotations
-
 import tempfile
 import unittest
 from pathlib import Path

@@ -1,7 +1,5 @@
 """Per-request browser session lifecycle and filesystem isolation."""
 
-from __future__ import annotations
-
 import errno
 import shutil
 import threading

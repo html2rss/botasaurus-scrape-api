@@ -1,7 +1,5 @@
 """Scrape request orchestration between HTTP boundary and execution engine."""
 
-from __future__ import annotations
-
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor

@@ -1,7 +1,5 @@
 """Unit tests for WarmDriverPool and DriverFingerprint."""
 
-from __future__ import annotations
-
 import io
 import logging
 import shutil
@@ -365,7 +363,7 @@ class WarmPoolTests(unittest.TestCase):
         self.assertIsNotNone(hit)
         assert hit is not None
         _, spare_dir = hit
-        (spare_dir / "marker").write_text("in-use", encoding="utf-8")
+        (spare_dir / "marker").write_text("in-use")
 
         from app.infra.runtime_cleanup import prune_orphan_runtime_dirs
 

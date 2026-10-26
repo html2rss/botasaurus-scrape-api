@@ -6,8 +6,6 @@ metadata / readiness; ``harvest()`` fetches bodies on the caller thread after
 navigation/scroll completes.
 """
 
-from __future__ import annotations
-
 import base64
 import threading
 from typing import cast

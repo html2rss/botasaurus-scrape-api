@@ -1,7 +1,5 @@
 """Best-effort cgroup-v2 memory probes shared by warm pool and runtime stats."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from pathlib import Path
 

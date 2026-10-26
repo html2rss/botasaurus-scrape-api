@@ -1,7 +1,5 @@
 """WorkLease timeout envelope builder (single owner)."""
 
-from __future__ import annotations
-
 import time
 import unittest
 

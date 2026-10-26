@@ -1,8 +1,6 @@
 # pyright: reportPrivateUsage=false
 """Sentry setup, readiness, and event filtering tests (exercise module privates)."""
 
-from __future__ import annotations
-
 import os
 import unittest
 from contextlib import contextmanager

@@ -1,7 +1,5 @@
 """Browser navigation strategies and driver interaction helpers."""
 
-from __future__ import annotations
-
 from typing import Any, cast
 
 from app.engine.driver_capabilities import (

@@ -1,7 +1,5 @@
 """Unit tests for strategy resolution and driver scrolling helpers."""
 
-from __future__ import annotations
-
 import unittest
 from typing import cast
 from unittest.mock import MagicMock

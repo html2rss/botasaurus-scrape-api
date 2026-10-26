@@ -9,8 +9,6 @@ and tracker blocking are applied in ``configure_driver()`` after adoption,
 not during spare build.
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
 import shutil

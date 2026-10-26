@@ -1,7 +1,5 @@
 """HTTP 504 envelope carries lease-derived timeout diagnostics."""
 
-from __future__ import annotations
-
 import unittest
 from unittest.mock import patch
 
