@@ -5,8 +5,8 @@ from typing import Any, cast
 from app.engine.driver_capabilities import (
     DriverProtocol,
     DriverTabProtocol,
-    call_if_available,
     call_quietly,
+    capability_available,
     resolve_callable,
     resolve_cdp_tab,
 )
@@ -23,7 +23,6 @@ from app.schemas.response import XhrResponse
 
 logger = get_logger()
 
-_CAPABILITY_MISS = object()
 _READINESS_CHUNK_SECONDS = 2
 
 TRACKER_URL_PATTERNS: list[str] = [
@@ -143,12 +142,7 @@ def wait_for_readiness(
     closed before the full wait budget burns. Non-selector settles probe once.
     """
     if not selector:
-        if (
-            call_if_available(
-                driver, "sleep_random", 0.5, 1.2, default=_CAPABILITY_MISS
-            )
-            is _CAPABILITY_MISS
-        ):
+        if not capability_available(driver, "sleep_random", 0.5, 1.2):
             driver.sleep(1)
         return _mid_wait_challenge(driver)
 
@@ -170,17 +164,13 @@ def wait_for_readiness(
 
 def apply_scrolling(driver: DriverProtocol) -> None:
     if (
-        call_if_available(driver, "scroll_to_bottom", default=_CAPABILITY_MISS)
-        is _CAPABILITY_MISS
-        and call_if_available(driver, "scroll", default=_CAPABILITY_MISS)
-        is _CAPABILITY_MISS
-        and call_if_available(
+        not capability_available(driver, "scroll_to_bottom")
+        and not capability_available(driver, "scroll")
+        and not capability_available(
             driver,
             "run_js",
             "window.scrollTo(0, document.body.scrollHeight);",
-            default=_CAPABILITY_MISS,
         )
-        is _CAPABILITY_MISS
     ):
         call_quietly(
             driver,
@@ -188,10 +178,7 @@ def apply_scrolling(driver: DriverProtocol) -> None:
             "window.scrollTo(0, document.body.scrollHeight);",
         )
 
-    if (
-        call_if_available(driver, "sleep_random", 0.4, 0.9, default=_CAPABILITY_MISS)
-        is _CAPABILITY_MISS
-    ):
+    if not capability_available(driver, "sleep_random", 0.4, 0.9):
         call_quietly(driver, "sleep", 0.5)
 
 

@@ -74,14 +74,15 @@ class DriverProtocol(Protocol):
 
 
 _STOPITERATION_RUNTIME = "StopIteration interacts badly with generators"
+_CAPABILITY_MISS = sentinel("_CAPABILITY_MISS")
 
 
 def resolve_cdp_tab(driver: DriverProtocol) -> CdpTabProtocol | None:
     """Return ``driver._tab``, or ``None`` when the browser has no page yet.
 
     Botasaurus exposes ``_tab`` as a property that calls ``get_first_tab()``.
-    An empty browser raises ``StopIteration``; under Python 3.14 that can be
-    wrapped as ``RuntimeError`` when crossing ``asyncio`` executor boundaries.
+    An empty browser raises ``StopIteration``; a generator boundary turns that
+    into ``RuntimeError``. Both are treated as no tab.
     """
     try:
         tab = getattr(driver, "_tab", None)
@@ -145,6 +146,20 @@ def call_if_available(
     except Exception as exc:
         logger.debug("driver_capability_failed method=%s error=%s", name, exc)
         return default
+
+
+def capability_available(
+    driver: DriverProtocol,
+    name: str,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> bool:
+    """True when ``name`` was present and the call did not raise."""
+    return (
+        call_if_available(driver, name, *args, default=_CAPABILITY_MISS, **kwargs)
+        is not _CAPABILITY_MISS
+    )
 
 
 def call_quietly(
