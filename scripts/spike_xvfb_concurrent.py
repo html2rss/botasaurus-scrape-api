@@ -5,8 +5,6 @@ Exit 0 always; prints JSON constraints for Phase 1 gate documentation.
 Run inside the service image with Chromium + xvfb available.
 """
 
-from __future__ import annotations
-
 import json
 import shutil
 import tempfile

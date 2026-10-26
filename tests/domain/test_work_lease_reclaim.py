@@ -1,7 +1,5 @@
 """WorkLease reclaim on deadline frees host slot; Future.cancel is not reclaim."""
 
-from __future__ import annotations
-
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor

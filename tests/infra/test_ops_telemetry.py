@@ -1,6 +1,4 @@
 # tests/test_ops_telemetry.py
-from __future__ import annotations
-
 import unittest
 from unittest.mock import MagicMock, patch
 

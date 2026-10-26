@@ -1,7 +1,5 @@
 """Phase 2 wiring tests for prewarmed browser handoff."""
 
-from __future__ import annotations
-
 import shutil
 import tempfile
 import threading
@@ -294,7 +292,7 @@ class WarmWiringTests(unittest.TestCase):
         self.assertIsNotNone(hit)
         assert hit is not None
         driver, spare_dir = hit
-        (spare_dir / "marker").write_text("in-use", encoding="utf-8")
+        (spare_dir / "marker").write_text("in-use")
 
         removed = engine.prune_runtime_dirs()
         self.assertEqual(removed, 0)

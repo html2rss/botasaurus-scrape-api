@@ -1,7 +1,5 @@
 """Periodic runtime heartbeat and startup preflight probes."""
 
-from __future__ import annotations
-
 import logging
 import os
 import shutil
@@ -67,7 +65,7 @@ def home_is_writable(*, home: Path | None = None) -> bool:
     try:
         target.mkdir(parents=True, exist_ok=True)
         probe = target / ".scrape_home_writable"
-        probe.write_text("ok", encoding="utf-8")
+        probe.write_text("ok")
         probe.unlink(missing_ok=True)
         return True
     except OSError:
@@ -130,7 +128,7 @@ def run_runtime_preflight(
     try:
         runtime_root.mkdir(parents=True, exist_ok=True)
         probe = runtime_root / ".preflight_writable"
-        probe.write_text("ok", encoding="utf-8")
+        probe.write_text("ok")
         probe.unlink(missing_ok=True)
     except OSError as exc:
         ok = False

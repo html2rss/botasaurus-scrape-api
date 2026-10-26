@@ -1,7 +1,5 @@
 """Unit tests for ScrapeRequest and WindowSize Pydantic schema validation."""
 
-from __future__ import annotations
-
 import unittest
 
 from pydantic import ValidationError

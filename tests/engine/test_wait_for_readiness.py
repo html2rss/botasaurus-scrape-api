@@ -1,7 +1,5 @@
 """wait_for_readiness fail-closed on unreadable mid-wait surfaces."""
 
-from __future__ import annotations
-
 import unittest
 from typing import Any
 

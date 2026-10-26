@@ -1,7 +1,5 @@
 """Anti-detect HTTP request execution tier."""
 
-from __future__ import annotations
-
 import logging
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse

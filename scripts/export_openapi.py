@@ -4,8 +4,6 @@
 The committed file is a snapshot of ``app.openapi()``, not an authored spec.
 """
 
-from __future__ import annotations
-
 import argparse
 import sys
 from pathlib import Path
@@ -28,7 +26,7 @@ def export(path: Path) -> None:
         default_flow_style=False,
         allow_unicode=True,
     )
-    path.write_text(HEADER + dumped, encoding="utf-8")
+    path.write_text(HEADER + dumped)
 
 
 def main() -> int:

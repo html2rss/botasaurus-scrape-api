@@ -1,7 +1,5 @@
 """WorkLease: admit, deadline, phase snapshot, and Chromium reclaim ownership."""
 
-from __future__ import annotations
-
 import asyncio
 import threading
 import time

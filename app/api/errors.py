@@ -1,7 +1,5 @@
 """HTTP exception handlers returning scrape error envelopes."""
 
-from __future__ import annotations
-
 import logging
 from typing import TypedDict, cast
 from urllib.parse import urlparse

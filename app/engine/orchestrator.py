@@ -1,7 +1,5 @@
 """Scrape execution orchestrator across HTTP and browser tiers."""
 
-from __future__ import annotations
-
 import logging
 import threading
 import time

@@ -1,5 +1,5 @@
 # Use official Python runtime pinned by digest
-FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83 AS builder
+FROM python:3.15.1-slim-bookworm@sha256:575f8bc12ec26542e0678bc6b60e385218248019d433157ec327264a78c3a853 AS builder
 
 WORKDIR /build
 
@@ -13,7 +13,7 @@ RUN apt-get update \
 COPY requirements.txt /build/requirements.txt
 RUN pip wheel --no-cache-dir --wheel-dir /build/wheels -r /build/requirements.txt
 
-FROM python:3.14-slim-bookworm@sha256:48b13b003dda20b16f9442b8475aa05fe21bf6579a8c881db92ffb4d8fd20f83
+FROM python:3.15.1-slim-bookworm@sha256:575f8bc12ec26542e0678bc6b60e385218248019d433157ec327264a78c3a853
 
 WORKDIR /app
 
@@ -33,7 +33,7 @@ RUN grep -v '^botasaurus @ git+' /app/requirements.txt > /app/requirements.runti
     && echo 'botasaurus' >> /app/requirements.runtime.txt \
     && pip install --no-cache-dir --no-index --find-links /wheels -r /app/requirements.runtime.txt \
     && python3 -c "import botasaurus.request" \
-    && chmod -R a+rx /usr/local/lib/python3.14/site-packages \
+    && chmod -R a+rx "$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
     && rm -f /app/requirements.runtime.txt \
     && rm -rf /wheels
 

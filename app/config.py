@@ -1,7 +1,5 @@
 """Centralized runtime configuration loaded from environment variables."""
 
-from __future__ import annotations
-
 from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path

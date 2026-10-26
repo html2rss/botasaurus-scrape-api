@@ -1,7 +1,5 @@
 """Tests for structured log_event text/JSON parity and health filtering."""
 
-from __future__ import annotations
-
 import io
 import json
 import logging
@@ -186,7 +184,7 @@ class LoggingConfigTests(unittest.TestCase):
         pattern = re.compile(r'logger\.(?:info|warning)\(\s*\n?\s*["\'][a-z0-9_]+')
         offenders: list[str] = []
         for path in app_root.rglob("*.py"):
-            text = path.read_text(encoding="utf-8")
+            text = path.read_text()
             for match in pattern.finditer(text):
                 line_no = text.count("\n", 0, match.start()) + 1
                 offenders.append(f"{path.relative_to(app_root.parent)}:{line_no}")

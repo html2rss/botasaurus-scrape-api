@@ -1,7 +1,5 @@
 """Validated test constructors for scrape request wire types."""
 
-from __future__ import annotations
-
 from typing import Any, cast
 
 from pydantic import HttpUrl

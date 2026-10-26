@@ -1,7 +1,5 @@
 """browser_boot_failed is emitted when Driver construction fails."""
 
-from __future__ import annotations
-
 import io
 import json
 import logging

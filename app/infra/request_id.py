@@ -1,7 +1,5 @@
 """Request id resolution from headers with fallback generation."""
 
-from __future__ import annotations
-
 import logging
 import re
 import uuid

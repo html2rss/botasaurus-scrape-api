@@ -1,7 +1,5 @@
 """Shared test fakes for scrape API layers."""
 
-from __future__ import annotations
-
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field

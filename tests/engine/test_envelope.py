@@ -1,7 +1,5 @@
 """Unit tests for envelope construction and HTML UTF-8 normalization."""
 
-from __future__ import annotations
-
 import unittest
 
 from app.engine.envelope import (

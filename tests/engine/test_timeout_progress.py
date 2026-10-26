@@ -1,7 +1,5 @@
 """Engine lease phase marking across queue, boot, and work phases."""
 
-from __future__ import annotations
-
 import tempfile
 import time
 import unittest

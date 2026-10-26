@@ -1,7 +1,5 @@
 """Pure unit tests for wall-clock budget math clamps and composition."""
 
-from __future__ import annotations
-
 import time
 import unittest
 

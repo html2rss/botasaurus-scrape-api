@@ -1,7 +1,5 @@
 """Single owner of scrape wall-clock budget math shared across tiers."""
 
-from __future__ import annotations
-
 import time
 
 from app.config import Settings

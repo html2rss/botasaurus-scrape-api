@@ -1,7 +1,5 @@
 """ScrapeService outer timeout maps lease TimeoutError to 504 envelope."""
 
-from __future__ import annotations
-
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch

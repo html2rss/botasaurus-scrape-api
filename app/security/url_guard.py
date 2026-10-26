@@ -1,7 +1,5 @@
 """SSRF guardrails for scrape target and proxy URLs."""
 
-from __future__ import annotations
-
 import ipaddress
 import socket
 from dataclasses import dataclass
