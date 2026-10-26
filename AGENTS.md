@@ -4,7 +4,7 @@
 
 - Docker-first and Docker-only unless user asks otherwise.
 - Stable Botasaurus scrape API wrapper — not a generic framework.
-- Reduce LOCs; time matters; modern Python 3.12+ (`StrEnum`, `type` aliases, `X | Y`, `pathlib.Path`, Pydantic v2, strict `pyright`).
+- Reduce LOCs; time matters; modern Python 3.15 (`StrEnum`, `type` aliases, `X | Y`, `pathlib.Path`, Pydantic v2, strict `pyright`). No free-threading, no experimental JIT.
 - No backward compatibility; no shims; no long-lived re-export layers.
 
 ## Layers
@@ -29,7 +29,7 @@ Challenge corpus: `tests/fixtures/challenge/` is the single interstitial fixture
 - `NavigationMode` end-to-end; no raw strategy strings outside enum boundaries.
 - Optional driver methods: `driver_capabilities.call_if_available` / `resolve_callable` only — no ad-hoc `getattr`.
 - OpenAPI examples: `openapi_examples.py` model instances. `create_router()` included from `create_app()` **after** `configure_openapi(settings)`.
-- Botasaurus/CDP imports lazy inside `run_request_tier`, `run_browser_tier`, XhrCollector — not at app import.
+- Botasaurus/CDP imports stay function-local inside `run_request_tier`, `create_driver_from_fingerprint`, and `XhrCollector` so tests can patch the vendor module. Do not use `lazy` or `__lazy_modules__` for those.
 - One `ScraperEngine` + one `ThreadPoolExecutor` on `app.state` from lifespan; deps read `request.app.state`. Shutdown: `executor.shutdown(wait=False, cancel_futures=True)`.
 - Do not freeze settings at import. Hot path injects `Settings`; no `get_settings()` fallback. `clamp_wait_timeout_seconds` reads live `get_settings()`.
 - Types: `make typecheck` = `pyright` strict on `app tests`. Stubs in `typings/`; CDP in `app/infra/cdp_types.py`; seams `DriverProtocol` / `CdpTabProtocol`. Tests: `tests/support/factories.py`, `tests/support/fakes.py`. Prefer fixing types over `# pyright:` escapes.

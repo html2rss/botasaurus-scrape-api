@@ -25,13 +25,13 @@ jobs:
         # ruff-action has v4.1.0 / v4.0.0 tags, not a floating v4 major.
         uses: astral-sh/ruff-action@v4.1.0
         with:
-          version: "0.16.3"
+          version: "0.17.1"
           args: check --output-format=github
 
       - name: Check Ruff format
         uses: astral-sh/ruff-action@v4.1.0
         with:
-          version: "0.16.3"
+          version: "0.17.1"
           args: format --check
 
   hadolint:
@@ -76,7 +76,7 @@ jobs:
       - name: Get Python version from Dockerfile
         id: get-version
         run: |
-          # Extract version like "3.14" from "FROM python:3.14-slim..."
+          # Extract major.minor like "3.15" from "FROM python:3.15.1-slim-bookworm..."
           VERSION=$(grep -m 1 "^FROM python:" Dockerfile | sed -E 's/^FROM python:([0-9]+\.[0-9]+).*/\1/')
           
           if [ -z "$VERSION" ]; then
