@@ -1,5 +1,7 @@
 """FastAPI application factory."""
 
+import logging
+import platform
 from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -13,7 +15,8 @@ from app.engine import ScraperEngine
 from app.engine.warm_pool import WarmDriverPool, create_driver_from_fingerprint
 from app.infra.runtime_stats import RuntimeStatsReporter, run_runtime_preflight
 from app.infra.sentry import flush_sentry, setup_sentry
-from app.logging_config import setup_logging
+from app.infra.version import botasaurus_version
+from app.logging_config import get_logger, log_event, setup_logging
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -40,6 +43,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             max_workers=max(1, resolved_settings.scrape_max_workers)
         )
         run_runtime_preflight(runtime_root=engine.runtime_root)
+        log_event(
+            get_logger(),
+            logging.INFO,
+            "service_started",
+            release=resolved_settings.sentry.release.strip() or None,
+            botasaurus_version=botasaurus_version(),
+            python=platform.python_version(),
+            prewarm=resolved_settings.scrape_prewarm,
+            max_workers=resolved_settings.scrape_max_workers,
+            max_per_host=resolved_settings.scrape_max_per_host,
+            timeout_s=resolved_settings.scrape_timeout_seconds,
+            work_timeout_s=resolved_settings.scrape_work_timeout_seconds,
+            log_format=resolved_settings.log_format.value,
+            sentry=bool(resolved_settings.sentry.dsn.strip()),
+        )
         stats = RuntimeStatsReporter(
             interval_seconds=float(
                 resolved_settings.scrape_runtime_stats_interval_seconds
