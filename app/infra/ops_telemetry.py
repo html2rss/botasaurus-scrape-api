@@ -2,7 +2,7 @@ from typing import Protocol, cast
 from urllib.parse import urlparse
 
 from app.constants import SERVICE_NAME
-from app.schemas.enums import ErrorCategory
+from app.schemas.enums import ErrorCategory, TimeoutPhase
 from app.schemas.response import ScrapeError
 
 
@@ -14,14 +14,6 @@ class SentryScope(Protocol):
     def set_tag(self, key: str, value: str) -> None: ...
 
     def set_context(self, key: str, value: dict[str, object]) -> None: ...
-
-
-_P0_CATEGORIES = frozenset(
-    {
-        ErrorCategory.NAVIGATION_ERROR,
-        ErrorCategory.TIMEOUT,
-    }
-)
 
 
 def _hostname(url: str) -> str | None:
@@ -71,12 +63,12 @@ def report_terminal_outcome(
     http_status: int,
     warm_hit: bool | None = None,
 ) -> None:
-    """Emit P0 operational scrape failures to Sentry as grouped Issues."""
+    """Emit service-side scrape failures to Sentry as grouped Issues."""
     from app.infra.sentry import sentry_is_ready
 
     if not sentry_is_ready():
         return
-    if result.error_category not in _P0_CATEGORIES:
+    if not is_service_side_failure(result):
         return
 
     import sentry_sdk
@@ -96,37 +88,21 @@ def report_terminal_outcome(
         )
 
 
-def record_challenge_block(result: ScrapeError) -> None:
-    """Increment challenge_block product signal metric; stdout logging stays in engine."""
-    from app.infra.sentry import sentry_is_ready
+def is_service_side_failure(result: ScrapeError) -> bool:
+    """True for failures that signal our service health, not the scraped site.
 
-    if not sentry_is_ready():
-        return
-    if result.error_category != ErrorCategory.CHALLENGE_BLOCK:
-        return
-
-    host = _hostname(result.url)
+    Queue/boot timeouts (capacity, Chromium start) and failures before any
+    navigation attempt (boot, storage) are actionable. Work-phase timeouts,
+    navigation errors on the target and anti-bot blocks are expected product
+    outcomes and are tracked as OpenTelemetry metrics/traces instead.
+    """
     diagnostics = result.diagnostics
-    attributes: dict[str, str] = {
-        "host": host or "unknown",
-        "execution_tier": (
-            diagnostics.execution_tier.value
-            if diagnostics.execution_tier is not None
-            else "unknown"
-        ),
-        "strategy_used": (
-            diagnostics.strategy_used.value
-            if diagnostics.strategy_used is not None
-            else "unknown"
-        ),
-    }
-
-    try:
-        from sentry_sdk import metrics
-
-        metrics.count("scrape.challenge_block", 1, attributes=attributes)
-    except (ImportError, AttributeError):  # fmt: skip
-        return
+    if result.error_category == ErrorCategory.TIMEOUT:
+        return diagnostics.timeout_phase in {TimeoutPhase.QUEUE, TimeoutPhase.BOOT}
+    return (
+        result.error_category == ErrorCategory.NAVIGATION_ERROR
+        and diagnostics.attempts == 0
+    )
 
 
 def emit_terminal_telemetry(
@@ -135,7 +111,4 @@ def emit_terminal_telemetry(
     http_status: int,
     warm_hit: bool | None = None,
 ) -> None:
-    if result.error_category == ErrorCategory.CHALLENGE_BLOCK:
-        record_challenge_block(result)
-        return
     report_terminal_outcome(result, http_status=http_status, warm_hit=warm_hit)

@@ -32,6 +32,36 @@ _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
 )
 
 
+_VENDOR_BY_MARKER_PART: tuple[tuple[str, str], ...] = (
+    ("captcha-delivery", "datadome"),
+    ("datadome", "datadome"),
+    ("cf-", "cloudflare"),
+    ("cloudflare", "cloudflare"),
+    ("just a moment", "cloudflare"),
+    ("checking your browser", "cloudflare"),
+    ("enable javascript and cookies", "cloudflare"),
+    ("cdn-cgi", "cloudflare"),
+    ("vercel", "vercel"),
+    ("checking the security", "vercel"),
+)
+
+
+def describe_challenge(marker: str | None, *, blocked: bool) -> tuple[str, str]:
+    """Bounded ``(vendor, signal)`` labels for telemetry from a matched marker."""
+    if marker is None:
+        return "unknown", "status" if blocked else "none"
+    lowered = marker.lower()
+    if lowered.startswith("botasaurus_driver"):
+        return "unknown", "driver"
+    if lowered == "unreadable_surface":
+        return "unknown", "surface"
+    signal = "header" if lowered in {"cf-mitigated", "x-datadome"} else "html"
+    for part, vendor in _VENDOR_BY_MARKER_PART:
+        if part in lowered:
+            return vendor, signal
+    return "unknown", signal
+
+
 @dataclass(frozen=True, slots=True)
 class ChallengeAssessment:
     blocked_detected: bool

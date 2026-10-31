@@ -14,7 +14,6 @@ class SentryEventHint(TypedDict, total=False):
 
 
 class SentryEvent(TypedDict, total=False):
-    tags: dict[str, str]
     logger: str
     logentry: dict[str, str]
     message: str
@@ -32,10 +31,6 @@ def sentry_is_ready() -> bool:
 
 
 def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | None:
-    tags = event.get("tags") or {}
-    if tags.get("error_category") == "challenge_block":
-        return None
-
     log_record = hint.get("log_record")
     logger_name = event.get("logger")
     if logger_name == "websocket" or getattr(log_record, "name", None) == "websocket":
@@ -50,7 +45,7 @@ def _before_send(event: SentryEvent, hint: SentryEventHint) -> SentryEvent | Non
 
 
 def setup_sentry(settings: Settings | None = None) -> bool:
-    """Initialize Sentry when SENTRY_DSN is set. Returns True on success."""
+    """Initialize Sentry (error tracking only) when SENTRY_DSN is set."""
     global _initialized
 
     from app.config import get_settings
@@ -82,7 +77,6 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
     init_kwargs: dict[str, Any] = {
         "dsn": dsn,
         "environment": sentry.effective_environment(deployment_environment),
-        "traces_sample_rate": sentry.traces_sample_rate,
         "send_default_pii": sentry.send_default_pii,
         "integrations": [
             FastApiIntegration(),
@@ -93,8 +87,6 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
 
     if sentry.release.strip():
         init_kwargs["release"] = sentry.release.strip()
-    if sentry.profiles_sample_rate > 0.0:
-        init_kwargs["profiles_sample_rate"] = sentry.profiles_sample_rate
 
     sentry_sdk.init(**init_kwargs)
     _initialized = True
@@ -105,7 +97,6 @@ def _setup_sentry(sentry: SentrySettings, *, deployment_environment: str) -> boo
         "sentry_initialized",
         environment=sentry.effective_environment(deployment_environment),
         release=sentry.release or None,
-        traces_sample_rate=sentry.traces_sample_rate,
     )
     return True
 
