@@ -1,6 +1,7 @@
 """Browser navigation strategies and driver interaction helpers."""
 
 import logging
+from urllib.parse import urlparse
 
 from app.engine.driver_protocol import DriverProtocol, resolve_cdp_tab
 from app.infra.detector import (
@@ -94,13 +95,21 @@ def configure_driver(
                 cdp.network.set_extra_http_headers(cdp.network.Headers(payload.headers))
             )
 
-    if payload.cookies:
-        driver.add_cookies(
-            [
-                {"name": str(name), "value": str(val), "url": target_url}
-                for name, val in payload.cookies.items()
-            ]
-        )
+    for name, value in (payload.cookies or {}).items():
+        try:
+            # path="/" so the cookie also reaches redirects and sibling paths.
+            driver.add_cookies(
+                [{"name": name, "value": value, "url": target_url, "path": "/"}]
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "cookie_rejected",
+                host=urlparse(target_url).hostname,
+                name=name,
+                error=str(exc),
+            )
 
 
 def _mid_wait_challenge(driver: DriverProtocol) -> ChallengeAssessment | None:

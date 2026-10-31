@@ -297,7 +297,7 @@ On outer **504**, queued Futures are cancelled (work never starts). In-flight sc
 3. Build request-scoped runtime dir and profile under `/tmp/scrape/<request_id>`.
 4. Create `Driver(...)` with request options.
 5. Run strategy loop (`auto` or explicit mode) and optional selector wait.
-6. Return HTML plus best-effort metadata (`driver.requests.get`).
+6. Return HTML plus main-document status/headers captured via CDP (browser tier).
 7. Always run cleanup in `finally`:
    - close driver
    - delete runtime dir

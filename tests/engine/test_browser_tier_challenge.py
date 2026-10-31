@@ -11,17 +11,25 @@ from app.engine import ScraperEngine
 from app.schemas.enums import ErrorCategory, ExecutionMode, NavigationMode, TimeoutPhase
 from app.schemas.response import ScrapeError
 from tests.support.factories import scrape_request
-from tests.support.fakes import FakeDriver
+from tests.support.fakes import FakeDriver, FakeDriverTab, FakeNetworkResponse
 
 
-class _PassiveRequest:
-    def __init__(self, status: int, url: str) -> None:
-        self.url = url
-        self.response = type(
-            "Resp",
-            (),
-            {"status_code": status, "headers": {"content-type": "text/html"}},
-        )()
+class _DocumentTab(FakeDriverTab):
+    """Fires a main-frame document response when the driver navigates."""
+
+    def __init__(self) -> None:
+        self.handler: Any = None
+
+    def after_response_received(self, handler: Any, /) -> None:
+        self.handler = handler
+
+    def respond(self, status: int) -> None:
+        document_type = type("T", (), {"value": "Document"})()
+        event = type("E", (), {"loader_id": "L1", "type_": document_type})()
+        response = FakeNetworkResponse(
+            "https://example.com/", status, "text/html", {"content-type": "text/html"}
+        )
+        self.handler("L1", response, event)
 
 
 class _ScenarioDriver(FakeDriver):
@@ -36,9 +44,8 @@ class _ScenarioDriver(FakeDriver):
         super().__init__(*args, **kwargs)
         self.page_html = type(self).page_body
         self.current_url = "https://example.com/"
-        status = type(self).http_status
-        if status is not None:
-            self.requests = [_PassiveRequest(status, "https://example.com/")]
+        self.document_tab = _DocumentTab()
+        self._tab = self.document_tab
 
     @classmethod
     def reset(cls) -> None:
@@ -46,6 +53,8 @@ class _ScenarioDriver(FakeDriver):
 
     def _navigate(self) -> None:
         type(self).navigate_calls += 1
+        if (status := type(self).http_status) is not None:
+            self.document_tab.respond(status)
         if type(self).timeout_on_nav:
             raise TimeoutError("Navigation timeout after 15s")
 

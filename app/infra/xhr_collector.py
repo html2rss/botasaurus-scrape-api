@@ -12,6 +12,7 @@ from typing import cast
 
 from app.engine.driver_protocol import CdpTabProtocol
 from app.infra.cdp_types import PendingXhrMeta
+from app.infra.metadata import DocumentResponse
 from app.logging_config import get_logger
 from app.schemas.response import XhrResponse
 
@@ -33,6 +34,7 @@ class XhrCollector:
         self._ready_ids: list[str] = []
         self._collected: list[XhrResponse] = []
         self._aggregate_bytes: int = 0
+        self._document: DocumentResponse | None = None
         self._lock = threading.Lock()
 
     def install(self, tab: CdpTabProtocol) -> None:
@@ -51,6 +53,13 @@ class XhrCollector:
             self._ready_ids.clear()
             self._collected.clear()
             self._aggregate_bytes = 0
+            self._document = None
+
+    @property
+    def document(self) -> DocumentResponse | None:
+        """Latest main-frame document response (final hop after redirects)."""
+        with self._lock:
+            return self._document
 
     @classmethod
     def _allowlisted_headers(cls, headers: object) -> dict[str, str]:
@@ -65,9 +74,27 @@ class XhrCollector:
                 allowed[normalized] = str(value)
         return allowed
 
-    def _on_response(
-        self, request_id: object, response: object, _event: object
-    ) -> None:
+    def _record_document(self, response: object) -> None:
+        raw = getattr(response, "headers", {})
+        headers = (
+            {str(k): str(v) for k, v in cast(dict[object, object], raw).items()}
+            if isinstance(raw, dict)
+            else {}
+        )
+        with self._lock:
+            self._document = DocumentResponse(
+                status_code=int(getattr(response, "status", 0)),
+                headers=headers,
+                url=str(getattr(response, "url", "")),
+            )
+
+    def _on_response(self, request_id: object, response: object, event: object) -> None:
+        # Main-frame navigations are the only requests whose id equals their loader id.
+        resource_type = getattr(getattr(event, "type_", None), "value", None)
+        if resource_type == "Document" and str(request_id) == str(
+            getattr(event, "loader_id", None)
+        ):
+            self._record_document(response)
         url = str(getattr(response, "url", ""))
         if url.rstrip("/") == self._target_url:
             return

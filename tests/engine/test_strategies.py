@@ -35,6 +35,21 @@ class StrategyTests(unittest.TestCase):
         apply_scrolling(mock_driver)
         mock_driver.scroll_to_bottom.assert_called_once()
 
+    def test_configure_driver_sets_cookies_on_root_path_and_survives_rejection(
+        self,
+    ) -> None:
+        mock_driver = MagicMock()
+        mock_driver._tab = None
+        mock_driver.add_cookies.side_effect = [RuntimeError("bad cookie"), None]
+        payload = scrape_request(cookies={"bad": "x", "ok": "y"})
+        configure_driver(
+            cast(DriverProtocol, mock_driver), payload, "https://e.com/a/b"
+        )
+        self.assertEqual(
+            mock_driver.add_cookies.call_args.args[0],
+            [{"name": "ok", "value": "y", "url": "https://e.com/a/b", "path": "/"}],
+        )
+
     def test_configure_driver_empty_tab_stopiteration(self) -> None:
         class EmptyTabDriver:
             @property

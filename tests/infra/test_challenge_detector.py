@@ -19,6 +19,20 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertIsNone(res.detected_marker)
         self.assertFalse(res.is_clean)
 
+    def test_cf_mitigated_header_is_challenge_even_on_200(self):
+        res = ChallengeDetector.detect(
+            "<html>ok</html>", 200, headers={"CF-Mitigated": "challenge"}
+        )
+        self.assertTrue(res.challenge_detected)
+        self.assertEqual(res.detected_marker, "cf-mitigated")
+
+    def test_x_datadome_header_only_labels_status_blocks(self):
+        headers = {"x-datadome": "protected"}
+        clean = ChallengeDetector.detect("<html>ok</html>", 200, headers=headers)
+        self.assertTrue(clean.is_clean)
+        blocked = ChallengeDetector.detect("<html>no</html>", 403, headers=headers)
+        self.assertEqual(blocked.detected_marker, "x-datadome")
+
     def test_clean_response(self):
         res = ChallengeDetector.detect("<html><h1>Hello</h1></html>", 200)
         self.assertTrue(res.is_clean)

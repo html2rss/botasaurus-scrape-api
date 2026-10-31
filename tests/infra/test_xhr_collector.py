@@ -51,6 +51,31 @@ class XhrCollectorTests(unittest.TestCase):
             body,
         )
 
+    def test_records_main_frame_document_response(self) -> None:
+        tab = FakeTab()
+        self.collector.install(tab)
+        handler = tab.response_handler
+        assert handler is not None
+        document_type = type("T", (), {"value": "Document"})()
+        main = type("E", (), {"loader_id": "L1", "type_": document_type})()
+        iframe = type("E", (), {"loader_id": "L9", "type_": document_type})()
+        handler(
+            FakeRequestId("L1"),
+            FakeNetworkResponse(self.target, 403, "text/html", {"x-datadome": "1"}),
+            main,
+        )
+        handler(
+            FakeRequestId("R2"),
+            FakeNetworkResponse("https://x/f", 200, "text/html"),
+            iframe,
+        )
+        document = self.collector.document
+        assert document is not None
+        self.assertEqual(document.status_code, 403)
+        self.assertEqual(document.headers, {"x-datadome": "1"})
+        self.collector.reset()
+        self.assertIsNone(self.collector.document)
+
     def test_install_enables_network_and_registers_handlers(self) -> None:
         tab = FakeTab()
         self.collector.install(tab)

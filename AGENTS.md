@@ -51,7 +51,7 @@ Challenge corpus: `tests/fixtures/challenge/` is the single interstitial fixture
 - `POST /scrape`: async API over sync threadpool work. No cache/profile/driver reuse across requests.
 - Prewarm (`SCRAPE_PREWARM=true`, default off): fingerprint-matched spare after browser scrape; idle TTL `SCRAPE_PREWARM_IDLE_TTL_SECONDS` (default `600`, `0`=never); min refill `SCRAPE_PREWARM_MIN_REFILL_SECONDS` (default `30`). Worst case 2 Chromiums briefly. Cgroup-v2 skip above 70% memory. Headed concurrent drivers OK (`PREWARM_HEADLESS_ONLY=False`).
 - `finally`: close driver; delete runtime dir (+ adopted spare); scrub active request id. Before each scrape prune orphans; `live_spare_dirs()` protects ready/in-build/adopted `spare-*` (`release_adopted` on session exit). Orphan `spare-*` cleaned at pool init. ENOSPC → prune-and-retry. `SCRAPE_RUNTIME_MIN_FREE_BYTES` (default 256MiB) logs low free space.
-- Metadata (`driver.requests.get`) is best-effort; failure must not fail HTML success.
+- Browser-tier `status_code`/`headers` come from the main-frame CDP document response captured by `XhrCollector`; absent capture falls back to `200`/`null` and must not fail HTML success. Status 401/403/429 fails closed as `challenge_block`.
 - `auto` order: `google_get` → `google_get_bypass` → `get`. Do not alter retry semantics without docs/tests.
 - Browser tier: skip XHR harvest before Cloudflare bypass; one `collect_page_state` after bypass.
 - Multi-arch: Chromium on all arches; keep `/usr/bin/google-chrome` → Chromium symlink. Re-verify binary path + Botasaurus startup if install logic changes.
