@@ -6,7 +6,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.engine.driver_capabilities import DriverProtocol, call_quietly
+from app.engine.driver_protocol import DriverProtocol, close_driver
 
 if TYPE_CHECKING:
     from app.engine.orchestrator import ScraperEngine
@@ -58,7 +58,7 @@ class ScrapeSession:
             driver = self.driver
             self.driver = None
         if driver is not None:
-            call_quietly(driver, "close")
+            close_driver(driver)
 
     def prepare_runtime_dir(self) -> None:
         """Create the request runtime dir only (warm-path adoption)."""

@@ -1,10 +1,14 @@
 """Anti-bot challenge detection from HTML and driver signals."""
 
+import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
 
-from app.engine.driver_capabilities import DriverProtocol, call_if_available
+from app.engine.driver_protocol import DriverProtocol
+from app.logging_config import get_logger, log_event
 from app.schemas.response import ChallengeSignal
+
+logger = get_logger()
 
 # Markers shared with html2rss BlockedSurface via tests/fixtures/challenge/.
 # One-sided substrings without a shared fixture were deleted in the corpus trim.
@@ -16,20 +20,15 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "cdn-cgi/challenge-platform",
     "cloudflare ray id",
     "captcha-delivery.com",
-    "datadome",
     "Vercel Security Checkpoint",
     "checking the security",
     "vercel.com/security",
 )
 
+_BLOCK_STATUS_CODES = frozenset({401, 403, 429})
+
 _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
     (m, m.lower()) for m in _CHALLENGE_MARKERS
-)
-
-_DRIVER_SIGNAL_METHODS: tuple[tuple[str, str], ...] = (
-    ("is_bot_detected", "botasaurus_driver_bot_detected"),
-    ("is_in_challenge", "botasaurus_driver_challenge"),
-    ("is_blocked", "botasaurus_driver_blocked"),
 )
 
 
@@ -62,22 +61,30 @@ UNREADABLE_SURFACE = ChallengeAssessment(
 class ChallengeDetector:
     """Deep module encapsulating anti-bot challenge heuristics, HTTP status codes, and driver checks."""
 
+    @staticmethod
+    def _driver_flags_bot(driver: DriverProtocol) -> bool:
+        try:
+            return driver.is_bot_detected()
+        except Exception as exc:
+            log_event(
+                logger, logging.WARNING, "driver_bot_detection_failed", error=str(exc)
+            )
+            return False
+
     @classmethod
     def detect(
         cls,
         html: str,
         status_code: int | None = None,
-        driver: object | None = None,
+        driver: DriverProtocol | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> ChallengeAssessment:
         matched_marker: str | None = None
+        header_keys = {k.lower(): v for k, v in (headers or {}).items()}
 
-        # 1. Driver-level anti-bot signal inspection
-        if driver is not None:
-            typed = cast(DriverProtocol, driver)
-            for method_name, marker_label in _DRIVER_SIGNAL_METHODS:
-                if call_if_available(typed, method_name, default=False):
-                    matched_marker = marker_label
-                    break
+        # 1. Driver-level anti-bot signal (Cloudflare / PerimeterX)
+        if driver is not None and cls._driver_flags_bot(driver):
+            matched_marker = "botasaurus_driver_bot_detected"
 
         # 2. HTML text markers (only inspect if driver check did not match)
         if matched_marker is None and html:
@@ -87,10 +94,17 @@ class ChallengeDetector:
                     matched_marker = marker
                     break
 
+        # 3. Header signals: cf-mitigated is only sent on challenges.
+        if matched_marker is None and header_keys.get("cf-mitigated") == "challenge":
+            matched_marker = "cf-mitigated"
+
+        status_blocked = status_code in _BLOCK_STATUS_CODES
+        # x-datadome also rides on clean responses, so it only labels status blocks.
+        if matched_marker is None and status_blocked and "x-datadome" in header_keys:
+            matched_marker = "x-datadome"
+
         challenge_detected = matched_marker is not None
-        blocked_detected = challenge_detected or (
-            status_code in {401, 403, 429} if status_code is not None else False
-        )
+        blocked_detected = challenge_detected or status_blocked
 
         return ChallengeAssessment(
             blocked_detected=blocked_detected,

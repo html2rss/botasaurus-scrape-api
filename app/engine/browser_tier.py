@@ -11,7 +11,7 @@ from app.engine.budget import (
     elapsed_ms,
     is_timeout_exception,
 )
-from app.engine.driver_capabilities import DriverProtocol, call_if_available
+from app.engine.driver_protocol import DriverProtocol
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.session import ScrapeSession
 from app.engine.strategies import (
@@ -29,7 +29,7 @@ from app.infra.detector import (
     ChallengeAssessment,
     ChallengeDetector,
 )
-from app.infra.metadata import MetadataExtractor, MetadataResult
+from app.infra.metadata import MetadataResult, resolve_metadata
 from app.infra.runtime_stats import home_is_writable, tmp_free_bytes
 from app.infra.xhr_collector import XhrCollector
 from app.logging_config import get_logger, log_event
@@ -61,11 +61,13 @@ def _log_browser_boot_failed(
 
 
 def _page_state(
-    driver: DriverProtocol, target_url: str
+    driver: DriverProtocol, target_url: str, collector: XhrCollector
 ) -> tuple[str, MetadataResult, ChallengeAssessment]:
     html = driver.page_html or ""
-    meta = MetadataExtractor.fetch(driver, target_url)
-    assessment = ChallengeDetector.detect(html, meta.status_code, driver=driver)
+    meta = resolve_metadata(collector.document, driver.current_url, target_url)
+    assessment = ChallengeDetector.detect(
+        html, meta.status_code, driver=driver, headers=meta.headers
+    )
     return html, meta, assessment
 
 
@@ -79,33 +81,33 @@ def settle_page_state(
     XHR harvest runs exactly once per attempt, after any bypass, so the
     consolidated pass captures post-bypass sub-resources.
     """
-    html, meta, assessment = _page_state(driver, target_url)
+    html, meta, assessment = _page_state(driver, target_url, collector)
     if assessment.is_clean:
         return html, meta, assessment, harvest_xhr(collector, driver)
 
-    call_if_available(driver, "bypass_cloudflare")
+    driver.detect_and_bypass_cloudflare()
     xhr_responses = harvest_xhr(collector, driver)
-    html, meta, assessment = _page_state(driver, target_url)
+    html, meta, assessment = _page_state(driver, target_url, collector)
     return html, meta, assessment, xhr_responses
 
 
-def _inspect_assessment(driver: DriverProtocol) -> ChallengeAssessment | None:
+def _inspect_assessment(
+    driver: DriverProtocol, collector: XhrCollector
+) -> ChallengeAssessment | None:
     """Best-effort challenge assessment after a nav/timeout exception.
 
-    Lean path only: html + passive request status + driver signals via
-    ChallengeDetector. Skips CDP log walks that can stall on a hung page.
-    Metadata failures must not discard HTML/driver challenge signals.
+    Lean path only: html + captured document response + driver signals.
+    Skips anything that can stall on a hung page.
     """
     try:
         html = driver.page_html or ""
-    except Exception:
-        return None
-    try:
-        status_code, _, _ = MetadataExtractor.extract_from_requests(driver)
-    except Exception:
-        status_code = None
-    try:
-        return ChallengeDetector.detect(html, status_code, driver=driver)
+        document = collector.document
+        return ChallengeDetector.detect(
+            html,
+            document.status_code if document else None,
+            driver=driver,
+            headers=document.headers if document else None,
+        )
     except Exception:
         return None
 
@@ -427,7 +429,7 @@ def run_browser_tier(
                 attempt=attempt_index,
                 error=str(exc),
             )
-            assessment = _inspect_assessment(driver)
+            assessment = _inspect_assessment(driver, collector)
             if assessment is None or not assessment.is_clean:
                 return _surface_unclean(
                     target_url,

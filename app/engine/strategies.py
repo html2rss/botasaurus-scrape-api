@@ -1,22 +1,16 @@
 """Browser navigation strategies and driver interaction helpers."""
 
-from typing import Any, cast
+import logging
+from urllib.parse import urlparse
 
-from app.engine.driver_capabilities import (
-    DriverProtocol,
-    DriverTabProtocol,
-    call_quietly,
-    capability_available,
-    resolve_callable,
-    resolve_cdp_tab,
-)
+from app.engine.driver_protocol import DriverProtocol, resolve_cdp_tab
 from app.infra.detector import (
     UNREADABLE_SURFACE,
     ChallengeAssessment,
     ChallengeDetector,
 )
 from app.infra.xhr_collector import XhrCollector
-from app.logging_config import get_logger
+from app.logging_config import get_logger, log_event
 from app.schemas.enums import NavigationMode
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import XhrResponse
@@ -55,30 +49,23 @@ def resolve_strategies(mode: NavigationMode, max_retries: int) -> list[Navigatio
     return [mode] * max_attempts
 
 
-def _driver_method(driver: DriverProtocol, *names: str):
-    return resolve_callable(driver, *names) or driver.get
-
-
 def navigate(
     driver: DriverProtocol,
     target_url: str,
     strategy: NavigationMode,
     timeout_seconds: int,
 ) -> None:
-    if strategy == NavigationMode.ORGANIC_GET:
-        method = _driver_method(driver, "organic_get", "google_get")
-    elif strategy.value.startswith("google_get"):
-        method = _driver_method(driver, "google_get")
-    else:
-        method = driver.get
-
-    kwargs: dict[str, Any] = {}
-    if strategy == NavigationMode.GOOGLE_GET_BYPASS:
-        kwargs["bypass_cloudflare"] = True
-    try:
-        method(target_url, timeout=timeout_seconds, **kwargs)
-    except TypeError:
-        method(target_url, **kwargs)
+    match strategy:
+        case NavigationMode.GET:
+            driver.get(target_url, timeout=timeout_seconds)
+        case NavigationMode.GOOGLE_GET:
+            driver.google_get(target_url, timeout=timeout_seconds)
+        case NavigationMode.GOOGLE_GET_BYPASS:
+            driver.google_get(
+                target_url, bypass_cloudflare=True, timeout=timeout_seconds
+            )
+        case NavigationMode.AUTO:
+            raise ValueError("navigation strategy must be resolved before navigate()")
 
 
 def configure_driver(
@@ -92,26 +79,37 @@ def configure_driver(
         if collector is not None:
             try:
                 collector.install(tab)
-            except Exception:
-                pass
-
+            except Exception as exc:
+                log_event(
+                    logger,
+                    logging.WARNING,
+                    "xhr_collector_install_failed",
+                    error=str(exc),
+                )
         if payload.block_trackers:
-            call_quietly(
-                cast(DriverTabProtocol, tab), "block_urls", TRACKER_URL_PATTERNS
+            tab.block_urls(TRACKER_URL_PATTERNS)
+        if payload.headers:
+            from botasaurus_driver import cdp
+
+            tab.send(
+                cdp.network.set_extra_http_headers(cdp.network.Headers(payload.headers))
             )
 
-    if payload.cookies:
-        for c_name, c_val in payload.cookies.items():
-            call_quietly(
-                driver,
-                "add_cookies",
-                [{"name": str(c_name), "value": str(c_val), "url": target_url}],
+    for name, value in (payload.cookies or {}).items():
+        try:
+            # path="/" so the cookie also reaches redirects and sibling paths.
+            driver.add_cookies(
+                [{"name": name, "value": value, "url": target_url, "path": "/"}]
             )
-
-    if payload.headers and tab is not None:
-        call_quietly(
-            cast(DriverTabProtocol, tab), "set_extra_http_headers", payload.headers
-        )
+        except Exception as exc:
+            log_event(
+                logger,
+                logging.WARNING,
+                "cookie_rejected",
+                host=urlparse(target_url).hostname,
+                name=name,
+                error=str(exc),
+            )
 
 
 def _mid_wait_challenge(driver: DriverProtocol) -> ChallengeAssessment | None:
@@ -142,8 +140,7 @@ def wait_for_readiness(
     closed before the full wait budget burns. Non-selector settles probe once.
     """
     if not selector:
-        if not capability_available(driver, "sleep_random", 0.5, 1.2):
-            driver.sleep(1)
+        driver.short_random_sleep()
         return _mid_wait_challenge(driver)
 
     remaining = max(0, int(timeout_seconds))
@@ -163,23 +160,8 @@ def wait_for_readiness(
 
 
 def apply_scrolling(driver: DriverProtocol) -> None:
-    if (
-        not capability_available(driver, "scroll_to_bottom")
-        and not capability_available(driver, "scroll")
-        and not capability_available(
-            driver,
-            "run_js",
-            "window.scrollTo(0, document.body.scrollHeight);",
-        )
-    ):
-        call_quietly(
-            driver,
-            "execute_script",
-            "window.scrollTo(0, document.body.scrollHeight);",
-        )
-
-    if not capability_available(driver, "sleep_random", 0.4, 0.9):
-        call_quietly(driver, "sleep", 0.5)
+    driver.scroll_to_bottom()
+    driver.short_random_sleep()
 
 
 def harvest_xhr(collector: XhrCollector, driver: DriverProtocol) -> list[XhrResponse]:

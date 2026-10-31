@@ -1,77 +1,22 @@
 import unittest
-from typing import cast
 
-from app.engine.driver_capabilities import DriverProtocol
-from app.infra.metadata import MetadataExtractor
+from app.infra.metadata import DocumentResponse, resolve_metadata
 
 
-class MetadataExtractorUnitTests(unittest.TestCase):
-    def test_extract_passive_metadata_from_requests_list(self):
-        class _Req:
-            def __init__(self, status: int, headers: dict[str, str], url: str) -> None:
-                self.response = type(
-                    "Resp", (), {"status_code": status, "headers": headers}
-                )()
-                self.url = url
+class ResolveMetadataTests(unittest.TestCase):
+    def test_uses_captured_document_status_and_headers(self) -> None:
+        doc = DocumentResponse(403, {"x-datadome": "protected"}, "https://e.com/")
+        meta = resolve_metadata(doc, "https://e.com/final", "https://e.com")
+        self.assertEqual(meta.status_code, 403)
+        self.assertEqual(meta.headers, {"x-datadome": "protected"})
+        self.assertEqual(meta.final_url, "https://e.com/final")
 
-        driver = type(
-            "D",
-            (),
-            {
-                "requests": [
-                    _Req(
-                        200, {"content-type": "text/html"}, "https://example.com/final"
-                    )
-                ]
-            },
-        )()
-        status, headers, final_url = MetadataExtractor.extract_from_requests(
-            cast(DriverProtocol, driver)
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(headers, {"content-type": "text/html"})
-        self.assertEqual(final_url, "https://example.com/final")
-
-    def test_extract_passive_metadata_from_performance_logs(self):
-        import json
-
-        perf_log = [
-            {
-                "message": json.dumps(
-                    {
-                        "message": {
-                            "method": "Network.responseReceived",
-                            "params": {
-                                "type": "Document",
-                                "response": {
-                                    "status": 200,
-                                    "headers": {"content-type": "text/html"},
-                                    "url": "https://example.com/cdp-final",
-                                },
-                            },
-                        }
-                    }
-                )
-            }
-        ]
-
-        class _LogDriver:
-            def get_log(self, log_type: str) -> list[dict[str, str]]:
-                return perf_log if log_type == "performance" else []
-
-        status, headers, final_url = MetadataExtractor.extract_from_cdp_logs(
-            cast(DriverProtocol, _LogDriver())
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(headers, {"content-type": "text/html"})
-        self.assertEqual(final_url, "https://example.com/cdp-final")
-
-    def test_extract_falls_back_to_200_when_no_driver_metadata(self):
-        driver = type("EmptyDriver", (), {"current_url": "https://example.com/dest"})()
-        meta = MetadataExtractor.fetch(
-            cast(DriverProtocol, driver), "https://example.com"
-        )
+    def test_defaults_to_200_without_document(self) -> None:
+        meta = resolve_metadata(None, None, "https://e.com")
         self.assertEqual(meta.status_code, 200)
-        self.assertEqual(meta.final_url, "https://example.com/dest")
         self.assertIsNone(meta.headers)
-        self.assertIsNone(meta.metadata_error)
+        self.assertEqual(meta.final_url, "https://e.com")
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -83,7 +83,7 @@ def run_request_tier(
         )
         final_url = resp.url or target_url
 
-        assessment = ChallengeDetector.detect(html, status_code)
+        assessment = ChallengeDetector.detect(html, status_code, headers=headers_dict)
         render_ms = elapsed_ms(started_monotonic)
 
         is_clean_success = (

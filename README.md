@@ -185,7 +185,6 @@ Request options (contract):
   - `get`: only `get`
   - `google_get`: only `google_get`
   - `google_get_bypass`: only `google_get(bypass_cloudflare=true)`
-  - `organic_get`: only `organic_get`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
 - `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_WORK_TIMEOUT_SECONDS]` (default `30`) are clamped into that range so scrape still runs.
@@ -298,7 +297,7 @@ On outer **504**, queued Futures are cancelled (work never starts). In-flight sc
 3. Build request-scoped runtime dir and profile under `/tmp/scrape/<request_id>`.
 4. Create `Driver(...)` with request options.
 5. Run strategy loop (`auto` or explicit mode) and optional selector wait.
-6. Return HTML plus best-effort metadata (`driver.requests.get`).
+6. Return HTML plus main-document status/headers captured via CDP (browser tier).
 7. Always run cleanup in `finally`:
    - close driver
    - delete runtime dir

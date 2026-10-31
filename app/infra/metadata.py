@@ -1,19 +1,15 @@
-"""Best-effort HTTP metadata extraction from browser driver state."""
+"""Main-document HTTP metadata for the browser tier."""
 
-import json
-import logging
 from dataclasses import dataclass
-from typing import cast
 
-from app.engine.driver_capabilities import DriverProtocol, DriverRequestProtocol
-from app.infra.cdp_types import (
-    CdpLogMessageEnvelope,
-    CdpPerformanceLogEntry,
-    CdpResponseReceivedMessage,
-)
-from app.logging_config import get_logger, log_event
 
-logger = get_logger()
+@dataclass(frozen=True, slots=True)
+class DocumentResponse:
+    """Main-frame document response captured from CDP ``Network.responseReceived``."""
+
+    status_code: int
+    headers: dict[str, str]
+    url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,110 +20,13 @@ class MetadataResult:
     metadata_error: str | None = None
 
 
-class MetadataExtractor:
-    """Deep module extracting passive network response metadata and CDP events."""
-
-    @classmethod
-    def extract_from_requests(
-        cls, driver: DriverProtocol
-    ) -> tuple[int | None, dict[str, str] | None, str | None]:
-        reqs = driver.requests
-        if not isinstance(reqs, (list, tuple)):
-            return None, None, None
-        typed_reqs: list[DriverRequestProtocol] = list(
-            cast(list[DriverRequestProtocol], reqs)
-        )
-        for req in reversed(typed_reqs):
-            resp = req.response
-            if resp is not None and resp.status_code is not None:
-                status_code = resp.status_code
-                headers = resp.headers
-                hdr_dict = (
-                    {
-                        str(k): str(v)
-                        for k, v in cast(dict[object, object], headers).items()
-                    }
-                    if isinstance(headers, dict)
-                    else None
-                )
-                req_url = req.url
-                return int(status_code), hdr_dict, str(req_url) if req_url else None
-        return None, None, None
-
-    @classmethod
-    def _parse_cdp_log_message(cls, raw_msg: str) -> CdpResponseReceivedMessage | None:
-        try:
-            msg_obj = json.loads(raw_msg)
-        except json.JSONDecodeError:
-            return None
-        if not isinstance(msg_obj, dict):
-            return None
-        envelope = cast(CdpLogMessageEnvelope, msg_obj)
-        message = envelope.get("message")
-        if not isinstance(message, dict):
-            return None
-        return message
-
-    @classmethod
-    def extract_from_cdp_logs(
-        cls, driver: DriverProtocol
-    ) -> tuple[int | None, dict[str, str] | None, str | None]:
-        get_log = getattr(driver, "get_log", None)
-        if not callable(get_log):
-            return None, None, None
-
-        try:
-            logs = get_log("performance")
-            if not isinstance(logs, list):
-                return None, None, None
-
-            for entry in reversed(cast(list[CdpPerformanceLogEntry], logs)):
-                raw_msg = entry.get("message", "{}")
-                msg = cls._parse_cdp_log_message(raw_msg)
-                if msg is None or msg.get("method") != "Network.responseReceived":
-                    continue
-
-                params = msg.get("params") or {}
-                resp = params.get("response") or {}
-                res_type = params.get("type") or resp.get("type")
-                if res_type and res_type not in ("Document", "Other"):
-                    continue
-
-                status_code = resp.get("status")
-                if status_code is not None:
-                    headers = resp.get("headers")
-                    hdr_dict = (
-                        {str(k): str(v) for k, v in headers.items()}
-                        if isinstance(headers, dict)
-                        else None
-                    )
-                    url = resp.get("url")
-                    return int(status_code), hdr_dict, str(url) if url else None
-        except Exception as exc:
-            logger.debug("cdp_metadata_extraction_failed error=%s", str(exc))
-
-        return None, None, None
-
-    @classmethod
-    def fetch(cls, driver: DriverProtocol, target_url: str) -> MetadataResult:
-        final_url = driver.current_url or target_url
-
-        try:
-            for extractor in (cls.extract_from_requests, cls.extract_from_cdp_logs):
-                status_code, headers, passive_url = extractor(driver)
-                if status_code is not None:
-                    return MetadataResult(
-                        status_code=status_code,
-                        headers=headers,
-                        final_url=passive_url or str(final_url),
-                        metadata_error=None,
-                    )
-        except Exception as exc:
-            log_event(logger, logging.WARNING, "metadata_fetch_error", error=str(exc))
-
-        return MetadataResult(
-            status_code=200,
-            headers=None,
-            final_url=str(final_url),
-            metadata_error=None,
-        )
+def resolve_metadata(
+    document: DocumentResponse | None, current_url: str | None, target_url: str
+) -> MetadataResult:
+    """Real status/headers when a document response was captured, else a 200 default."""
+    final_url = current_url or (document.url if document else None) or target_url
+    if document is None:
+        return MetadataResult(status_code=200, headers=None, final_url=final_url)
+    return MetadataResult(
+        status_code=document.status_code, headers=document.headers, final_url=final_url
+    )

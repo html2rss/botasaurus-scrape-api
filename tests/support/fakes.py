@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, cast
 
-from app.engine.driver_capabilities import CdpTabProtocol, DriverProtocol
+from app.engine.driver_protocol import CdpTabProtocol, DriverProtocol
 
 
 class FakeMetadataResponse:
@@ -20,11 +20,17 @@ class FakeRequests:
 
 
 class FakeDriverTab:
-    def block_urls(self, patterns: list[str]) -> None:
-        del patterns
+    def block_urls(self, urls: list[str]) -> None:
+        del urls
 
-    def set_extra_http_headers(self, headers: dict[str, str]) -> None:
-        del headers
+    def send(self, cdp_obj: Any) -> Any:
+        del cdp_obj
+
+    def after_response_received(self, handler: Any, /) -> None:
+        del handler
+
+    def add_handler(self, event_type: type[Any], handler: Any, /) -> None:
+        del event_type, handler
 
 
 class FakeDriver:
@@ -45,41 +51,29 @@ class FakeDriver:
     def google_get(self, *_args: object, **_kwargs: Any) -> None:
         return None
 
-    def organic_get(self, *_args: object, **_kwargs: Any) -> None:
-        return None
-
     def wait_for_element(self, *_args: object, **_kwargs: Any) -> None:
         raise RuntimeError("missing selector")
 
     def scroll_to_bottom(self) -> None:
         return None
 
-    def scroll(self) -> None:
-        return None
-
     def sleep(self, *_args: object, **_kwargs: Any) -> None:
         return None
 
-    def sleep_random(self, *_args: object, **_kwargs: Any) -> None:
-        return None
-
-    def run_js(self, _script: str) -> None:
-        return None
-
-    def execute_script(self, _script: str) -> None:
+    def short_random_sleep(self) -> None:
         return None
 
     def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
         return None
 
-    def bypass_cloudflare(self) -> None:
+    def detect_and_bypass_cloudflare(self) -> None:
         return None
+
+    def is_bot_detected(self) -> bool:
+        return False
 
     def close(self) -> None:
         return None
-
-    def get_log(self, _log_type: str) -> list[dict[str, str]]:
-        return []
 
 
 def _empty_cookie_batches() -> list[list[dict[str, str]]]:
@@ -105,8 +99,10 @@ class InstrumentedDriverTab(FakeDriverTab):
     def __init__(self, state: DriverConfigureState) -> None:
         self.state = state
 
-    def set_extra_http_headers(self, headers: dict[str, str]) -> None:
-        self.state.headers.append(dict(headers))
+    def send(self, cdp_obj: Any) -> Any:
+        command = next(cdp_obj)
+        if command["method"] == "Network.setExtraHTTPHeaders":
+            self.state.headers.append(dict(command["params"]["headers"]))
 
 
 class TrackingDriver(FakeDriver):
@@ -138,11 +134,6 @@ class TrackingDriver(FakeDriver):
     def google_get(self, *_args: object, **_kwargs: Any) -> None:
         if _args and isinstance(_args[0], str):
             self.state.navigation.append(f"google_get:{_args[0]}")
-        return None
-
-    def organic_get(self, *_args: object, **_kwargs: Any) -> None:
-        if _args and isinstance(_args[0], str):
-            self.state.navigation.append(f"organic_get:{_args[0]}")
         return None
 
 

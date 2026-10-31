@@ -20,10 +20,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from app.engine.driver_capabilities import (
+from app.engine.driver_protocol import (
     CdpTabProtocol,
     DriverProtocol,
-    call_quietly,
+    close_driver,
     resolve_cdp_tab,
 )
 from app.infra.cgroup import cgroup_memory_under_pressure, read_cgroup_memory
@@ -505,5 +505,5 @@ class WarmDriverPool:
         shutil.rmtree(spare.spare_dir, ignore_errors=True)
 
     def _close_driver(self, driver: DriverProtocol) -> None:
-        call_quietly(driver, "close")
+        close_driver(driver)
         self._close_count += 1

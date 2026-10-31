@@ -444,14 +444,6 @@ run_contract_prewarm_off() {
   [[ "$header_test_code" == "200" ]] || fail "Expected header test 200, got ${header_test_code}"
   assert_html_contains "$header_test_body" "VerifiedVal" || fail "Custom header not found in upstream response"
 
-  echo "[smoke] Checking organic_get navigation mode"
-  local organic_response organic_body organic_code
-  organic_response="$(http_post "/scrape" '{"url":"https://example.com","navigation_mode":"organic_get","max_retries":0,"headless":true}')"
-  organic_body="$(echo "$organic_response" | sed '$d')"
-  organic_code="$(echo "$organic_response" | tail -n1)"
-  [[ "$organic_code" == "200" ]] || fail "Expected organic_get scrape 200, got ${organic_code}"
-  assert_json_key_equals "$organic_body" "diagnostics.strategy_used" "organic_get" || fail "Expected strategy_used=organic_get"
-
   echo "[smoke] Checking scroll parameter"
   local scroll_response scroll_body scroll_code
   scroll_response="$(http_post "/scrape" '{"url":"https://example.com","scroll":true,"headless":true}')"
