@@ -56,4 +56,5 @@ RUN useradd --create-home --shell /usr/sbin/nologin appuser \
 USER appuser
 
 EXPOSE 4010
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4010"]
+# scrape_finished / scrape_rejected carry status, host and duration; access lines add no structure.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4010", "--no-access-log"]

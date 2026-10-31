@@ -95,7 +95,7 @@ class ResolveRequestIdTests(unittest.TestCase):
             patch(
                 "app.infra.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)
             ),
-            self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
+            self.assertLogs("botasaurus_scrape_api", level="DEBUG") as captured,
         ):
             resolve_request_id("bad/id", host="example.com")
 
@@ -108,7 +108,7 @@ class ResolveRequestIdTests(unittest.TestCase):
             patch(
                 "app.infra.request_id.uuid.uuid4", return_value=uuid.UUID(FALLBACK_UUID)
             ),
-            self.assertLogs("botasaurus_scrape_api", level="INFO") as captured,
+            self.assertLogs("botasaurus_scrape_api", level="DEBUG") as captured,
         ):
             resolve_request_id(None, host="example.com")
 
