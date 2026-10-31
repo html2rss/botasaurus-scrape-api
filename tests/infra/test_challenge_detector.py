@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 
-from app.infra.detector import ChallengeDetector
+from app.infra.detector import ChallengeDetector, describe_challenge
 
 
 class ChallengeDetectorUnitTests(unittest.TestCase):
@@ -32,6 +32,22 @@ class ChallengeDetectorUnitTests(unittest.TestCase):
         self.assertTrue(clean.is_clean)
         blocked = ChallengeDetector.detect("<html>no</html>", 403, headers=headers)
         self.assertEqual(blocked.detected_marker, "x-datadome")
+
+    def test_describe_challenge_vendor_and_signal(self):
+        cases = {
+            "captcha-delivery.com": ("datadome", "html"),
+            "x-datadome": ("datadome", "header"),
+            "cf-mitigated": ("cloudflare", "header"),
+            "Just a moment...": ("cloudflare", "html"),
+            "Vercel Security Checkpoint": ("vercel", "html"),
+            "botasaurus_driver_bot_detected": ("unknown", "driver"),
+            "unreadable_surface": ("unknown", "surface"),
+        }
+        for marker, expected in cases.items():
+            with self.subTest(marker=marker):
+                self.assertEqual(describe_challenge(marker, blocked=True), expected)
+        self.assertEqual(describe_challenge(None, blocked=True), ("unknown", "status"))
+        self.assertEqual(describe_challenge(None, blocked=False), ("unknown", "none"))
 
     def test_clean_response(self):
         res = ChallengeDetector.detect("<html><h1>Hello</h1></html>", 200)

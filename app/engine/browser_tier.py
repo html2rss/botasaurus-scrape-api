@@ -29,6 +29,7 @@ from app.infra.detector import (
     UNREADABLE_SURFACE,
     ChallengeAssessment,
     ChallengeDetector,
+    describe_challenge,
 )
 from app.infra.metadata import MetadataResult, resolve_metadata
 from app.infra.runtime_stats import home_is_writable, tmp_free_bytes
@@ -147,6 +148,9 @@ def _surface_unclean(
     assessment: ChallengeAssessment,
 ) -> ScrapeError:
     """Fail closed: any unclean assessment is challenge_block (no soft-retry)."""
+    vendor, signal = describe_challenge(
+        assessment.detected_marker, blocked=assessment.blocked_detected
+    )
     log_event(
         logger,
         logging.WARNING,
@@ -156,6 +160,8 @@ def _surface_unclean(
         strategy=strategy.value,
         attempt=attempts,
         marker=assessment.detected_marker,
+        vendor=vendor,
+        signal=signal,
     )
     return _challenge_block_error(
         target_url,

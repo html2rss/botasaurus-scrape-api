@@ -25,30 +25,9 @@ class SentrySettings(BaseSettings):
     dsn: str = Field(default="", validation_alias="SENTRY_DSN")
     environment: str = Field(default="", validation_alias="SENTRY_ENVIRONMENT")
     release: str = Field(default="", validation_alias="SENTRY_RELEASE")
-    traces_sample_rate: float = Field(
-        default=0.0, validation_alias="SENTRY_TRACES_SAMPLE_RATE"
-    )
-    profiles_sample_rate: float = Field(
-        default=0.0, validation_alias="SENTRY_PROFILES_SAMPLE_RATE"
-    )
     send_default_pii: bool = Field(
         default=False, validation_alias="SENTRY_SEND_DEFAULT_PII"
     )
-
-    @field_validator(
-        "traces_sample_rate",
-        "profiles_sample_rate",
-        mode="before",
-    )
-    @classmethod
-    def parse_sample_rate(cls, value: object) -> float:
-        # Env values are best-effort: invalid floats disable sampling
-        # instead of failing service startup.
-        try:
-            parsed = float(str(value).strip()) if value is not None else 0.0
-        except ValueError:
-            return 0.0
-        return max(0.0, min(1.0, parsed))
 
     @field_validator("send_default_pii", mode="before")
     @classmethod

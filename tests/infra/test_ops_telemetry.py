@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.infra.ops_telemetry import (
     emit_terminal_telemetry,
-    record_challenge_block,
+    is_service_side_failure,
     report_terminal_outcome,
 )
 from app.schemas.enums import ErrorCategory, ExecutionTier, NavigationMode, TimeoutPhase
@@ -19,6 +19,8 @@ def _scrape_error(
     strategy_used: NavigationMode | None = NavigationMode.GET,
     execution_tier: ExecutionTier | None = ExecutionTier.BROWSER_DRIVER,
     render_ms: int = 1500,
+    attempts: int = 0,
+    timeout_phase: TimeoutPhase | None = None,
 ) -> ScrapeError:
     return ScrapeError(
         url=url,
@@ -26,8 +28,9 @@ def _scrape_error(
         error_category=category,
         diagnostics=ScrapeDiagnostics(
             request_id=request_id,
-            attempts=2,
+            attempts=attempts,
             strategy_used=strategy_used,
+            timeout_phase=timeout_phase,
             render_ms=render_ms,
             execution_tier=execution_tier,
         ),
@@ -66,12 +69,14 @@ class OpsTelemetryTests(unittest.TestCase):
             mock_scope.set_tag.assert_any_call("host", "example.com")
             mock_scope.set_context.assert_called_once_with(
                 "scrape",
-                {"request_id": "req-123", "attempts": 2},
+                {"request_id": "req-123", "attempts": 0},
             )
             mock_scope.set_tag.assert_any_call("http_status", "502")
 
     def test_report_terminal_outcome_emits_p0_timeout(self):
-        result = _scrape_error(category=ErrorCategory.TIMEOUT)
+        result = _scrape_error(
+            category=ErrorCategory.TIMEOUT, timeout_phase=TimeoutPhase.QUEUE
+        )
         mock_scope = MagicMock()
         with (
             patch("app.infra.sentry.sentry_is_ready", return_value=True),
@@ -89,8 +94,9 @@ class OpsTelemetryTests(unittest.TestCase):
             mock_scope.set_tag.assert_any_call("http_status", "504")
 
     def test_report_terminal_outcome_tags_timeout_phase(self):
-        result = _scrape_error(category=ErrorCategory.TIMEOUT)
-        result.diagnostics.timeout_phase = TimeoutPhase.BOOT
+        result = _scrape_error(
+            category=ErrorCategory.TIMEOUT, timeout_phase=TimeoutPhase.BOOT
+        )
         mock_scope = MagicMock()
         with (
             patch("app.infra.sentry.sentry_is_ready", return_value=True),
@@ -111,7 +117,7 @@ class OpsTelemetryTests(unittest.TestCase):
                 "scrape",
                 {
                     "request_id": "req-123",
-                    "attempts": 2,
+                    "attempts": 0,
                     "timeout_phase": "boot",
                 },
             )
@@ -125,70 +131,52 @@ class OpsTelemetryTests(unittest.TestCase):
             report_terminal_outcome(result, http_status=502)
             mock_capture.assert_not_called()
 
-    def test_record_challenge_block_increments_metric_only(self):
-        result = _scrape_error(
-            category=ErrorCategory.CHALLENGE_BLOCK,
-            strategy_used=NavigationMode.GOOGLE_GET,
-            execution_tier=ExecutionTier.BROWSER_DRIVER,
+    def test_service_side_failure_classification(self):
+        self.assertTrue(
+            is_service_side_failure(
+                _scrape_error(
+                    category=ErrorCategory.TIMEOUT, timeout_phase=TimeoutPhase.QUEUE
+                )
+            )
         )
+        self.assertTrue(
+            is_service_side_failure(
+                _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
+            )
+        )
+        # Target-site failures are product outcomes (OpenTelemetry), not Sentry Issues.
+        self.assertFalse(
+            is_service_side_failure(
+                _scrape_error(
+                    category=ErrorCategory.TIMEOUT, timeout_phase=TimeoutPhase.WORK
+                )
+            )
+        )
+        self.assertFalse(
+            is_service_side_failure(
+                _scrape_error(category=ErrorCategory.NAVIGATION_ERROR, attempts=1)
+            )
+        )
+
+    def test_emit_terminal_telemetry_skips_target_site_failures(self):
+        result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR, attempts=2)
         with (
             patch("app.infra.sentry.sentry_is_ready", return_value=True),
-            patch("sentry_sdk.metrics.count") as mock_count,
             patch("sentry_sdk.capture_message") as mock_capture,
         ):
-            record_challenge_block(result)
-
-            mock_count.assert_called_once_with(
-                "scrape.challenge_block",
-                1,
-                attributes={
-                    "host": "example.com",
-                    "execution_tier": "browser_driver",
-                    "strategy_used": "google_get",
-                },
-            )
+            emit_terminal_telemetry(result, http_status=502)
             mock_capture.assert_not_called()
 
-    def test_record_challenge_block_noop_when_sentry_not_ready(self):
-        result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)
-        with (
-            patch("app.infra.sentry.sentry_is_ready", return_value=False),
-            patch("sentry_sdk.metrics.count") as mock_count,
-        ):
-            record_challenge_block(result)
-            mock_count.assert_not_called()
-
-    def test_record_challenge_block_skips_non_challenge_categories(self):
+    def test_emit_terminal_telemetry_routes_service_failures_to_issues(self):
         result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
-        with (
-            patch("app.infra.sentry.sentry_is_ready", return_value=True),
-            patch("sentry_sdk.metrics.count") as mock_count,
-        ):
-            record_challenge_block(result)
-            mock_count.assert_not_called()
-
-    def test_emit_terminal_telemetry_routes_challenge_block_to_metric(self):
-        result = _scrape_error(category=ErrorCategory.CHALLENGE_BLOCK)
-        with (
-            patch("app.infra.ops_telemetry.record_challenge_block") as mock_metric,
-            patch("app.infra.ops_telemetry.report_terminal_outcome") as mock_issue,
-        ):
-            emit_terminal_telemetry(result, http_status=502)
-            mock_metric.assert_called_once_with(result)
-            mock_issue.assert_not_called()
-
-    def test_emit_terminal_telemetry_routes_p0_errors_to_issues(self):
-        result = _scrape_error(category=ErrorCategory.NAVIGATION_ERROR)
-        with (
-            patch("app.infra.ops_telemetry.record_challenge_block") as mock_metric,
-            patch("app.infra.ops_telemetry.report_terminal_outcome") as mock_issue,
-        ):
+        with patch("app.infra.ops_telemetry.report_terminal_outcome") as mock_issue:
             emit_terminal_telemetry(result, http_status=502)
             mock_issue.assert_called_once_with(result, http_status=502, warm_hit=None)
-            mock_metric.assert_not_called()
 
     def test_report_terminal_outcome_tags_warm_hit_when_provided(self):
-        result = _scrape_error(category=ErrorCategory.TIMEOUT)
+        result = _scrape_error(
+            category=ErrorCategory.TIMEOUT, timeout_phase=TimeoutPhase.BOOT
+        )
         mock_scope = MagicMock()
         with (
             patch("app.infra.sentry.sentry_is_ready", return_value=True),
