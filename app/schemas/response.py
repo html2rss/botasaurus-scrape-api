@@ -134,6 +134,16 @@ class ScrapeSuccess(BaseModel):
             "(empty on the HTTP-request tier)."
         ),
     )
+    cookies: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Cookies set for the target host during this scrape (for example an "
+            "anti-bot clearance cookie), as a name/value map. Send them back in "
+            "the `cookies` request field to reuse the session; the service keeps "
+            "no state between requests."
+        ),
+        examples=[{"datadome": "abc123"}],
+    )
     diagnostics: ScrapeDiagnostics = Field(
         description="Per-request tracing, strategy, timing, and challenge signals.",
         examples=[

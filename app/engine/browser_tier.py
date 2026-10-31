@@ -24,6 +24,7 @@ from app.engine.strategies import (
 )
 from app.engine.warm_pool import DriverFingerprint, create_driver_from_fingerprint
 from app.engine.work_lease import WorkLease
+from app.infra.cookies import driver_cookies
 from app.infra.detector import (
     UNREADABLE_SURFACE,
     ChallengeAssessment,
@@ -416,6 +417,7 @@ def run_browser_tier(
                 execution_tier=ExecutionTier.BROWSER_DRIVER,
                 assessment=assessment,
                 xhr_responses=xhr_responses,
+                cookies=driver_cookies(driver, target_url, meta.final_url),
             )
         except Exception as exc:
             log_event(

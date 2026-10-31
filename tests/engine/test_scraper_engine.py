@@ -378,6 +378,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
             self.assertIsInstance(result, ScrapeSuccess)
             assert isinstance(result, ScrapeSuccess)
             self.assertEqual(result.html, html)
+            self.assertEqual(result.cookies, {})
             self.assertFalse(orphan.exists())
             self.assertEqual(list(runtime_root.iterdir()), [])
 

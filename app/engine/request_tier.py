@@ -12,6 +12,7 @@ from app.engine.budget import (
 )
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.work_lease import WorkLease
+from app.infra.cookies import jar_cookies
 from app.infra.detector import ChallengeDetector
 from app.logging_config import get_logger, log_event
 from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
@@ -162,6 +163,7 @@ def run_request_tier(
             render_ms=render_ms,
             execution_tier=ExecutionTier.HTTP_REQUEST,
             assessment=assessment,
+            cookies=jar_cookies(resp.cookies, target_url, final_url),
         )
     finally:
         try:

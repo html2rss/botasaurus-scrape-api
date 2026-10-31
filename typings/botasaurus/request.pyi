@@ -1,3 +1,4 @@
+from http.cookiejar import CookieJar
 from typing import Any, Literal
 
 class HttpResponse:
@@ -5,6 +6,7 @@ class HttpResponse:
     status_code: int | None
     headers: dict[str, str]
     url: str
+    cookies: CookieJar
 
 class Request:
     def get(

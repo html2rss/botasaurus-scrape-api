@@ -79,6 +79,7 @@ def build_success(
     metadata_error: str | None = None,
     assessment: ChallengeAssessment | None = None,
     xhr_responses: list[XhrResponse] | None = None,
+    cookies: dict[str, str] | None = None,
 ) -> ScrapeSuccess:
     html, headers = html_document_headers(html, headers)
     return ScrapeSuccess(
@@ -89,6 +90,7 @@ def build_success(
         html=html,
         metadata_error=metadata_error,
         xhr_responses=xhr_responses or [],
+        cookies=cookies or {},
         diagnostics=build_diagnostics(
             request_id=request_id,
             attempts=attempts,
