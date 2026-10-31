@@ -3,16 +3,17 @@
 import io
 import json
 import logging
+import sys
 import unittest
 from unittest.mock import patch
 
 from app.config import LogFormat, Settings, reset_settings_cache
 from app.logging_config import (
     LOGGER_NAME,
-    HealthAccessFilter,
     JsonFormatter,
     WebsocketTeardownFilter,
     log_event,
+    request_log_context,
     setup_logging,
 )
 
@@ -82,31 +83,43 @@ class LoggingConfigTests(unittest.TestCase):
         self.assertEqual(payload["request_id"], "rid-1")
         self.assertEqual(payload["status"], 504)
         self.assertEqual(payload["timeout_phase"], "boot")
-        self.assertIn("scrape_finished request_id=rid-1", payload["msg"])
-        self.assertNotIn("?", payload["msg"])
+        self.assertNotIn("msg", payload)
 
-    def test_health_access_filter_drops_get_health(self) -> None:
-        filt = HealthAccessFilter()
-        kept = logging.LogRecord(
-            name="uvicorn.access",
-            level=logging.INFO,
-            pathname=__file__,
-            lineno=1,
-            msg='%s - "%s" %s',
-            args=("127.0.0.1:1", "GET /scrape HTTP/1.1", 200),
-            exc_info=None,
+    def test_json_omits_none_fields_and_keeps_msg_for_plain_records(self) -> None:
+        record = logging.LogRecord(
+            "t", logging.INFO, __file__, 1, "plain %s", ("x",), None
         )
-        dropped = logging.LogRecord(
-            name="uvicorn.access",
-            level=logging.INFO,
-            pathname=__file__,
-            lineno=1,
-            msg='%s - "%s" %s',
-            args=("127.0.0.1:1", "GET /health HTTP/1.1", 200),
-            exc_info=None,
-        )
-        self.assertTrue(filt.filter(kept))
-        self.assertFalse(filt.filter(dropped))
+        self.assertEqual(json.loads(JsonFormatter().format(record))["msg"], "plain x")
+        event = logging.LogRecord("t", logging.INFO, __file__, 1, "e", (), None)
+        event.event_name = "scrape_finished"  # type: ignore[attr-defined]
+        event.event_fields = {"status": 200, "error_category": None}  # type: ignore[attr-defined]
+        payload = json.loads(JsonFormatter().format(event))
+        self.assertNotIn("error_category", payload)
+        self.assertEqual(payload["status"], 200)
+
+    def test_request_context_attaches_ids_and_explicit_fields_win(self) -> None:
+        record = logging.LogRecord("t", logging.INFO, __file__, 1, "e", (), None)
+        record.event_name = "scrape_boot"  # type: ignore[attr-defined]
+        record.event_fields = {"host": "explicit.example"}  # type: ignore[attr-defined]
+        with request_log_context(request_id="rid-9", host="ctx.example"):
+            payload = json.loads(JsonFormatter().format(record))
+        self.assertEqual(payload["request_id"], "rid-9")
+        self.assertEqual(payload["host"], "explicit.example")
+        self.assertNotIn("request_id", json.loads(JsonFormatter().format(record)))
+
+    def test_exception_is_structured_not_dropped(self) -> None:
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            record = logging.LogRecord(
+                "t", logging.ERROR, __file__, 1, "e", (), sys.exc_info()
+            )
+        record.event_name = "unhandled_exception"  # type: ignore[attr-defined]
+        record.event_fields = {}  # type: ignore[attr-defined]
+        payload = json.loads(JsonFormatter().format(record))
+        self.assertEqual(payload["exc_type"], "ValueError")
+        self.assertEqual(payload["exc_message"], "boom")
+        self.assertIn("Traceback", payload["exc_stack"])
 
     def test_websocket_teardown_filter_drops_all_websocket_logger_records(self) -> None:
         # Mirrors Sentry before_send: drop every record on logger name "websocket",

@@ -24,7 +24,7 @@ def resolve_request_id(inbound: str | None, *, host: str | None = None) -> str:
         return candidate
 
     reason = "absent" if not candidate else "invalid"
-    log_event(logger, logging.INFO, "request_id_fallback", host=host, reason=reason)
+    log_event(logger, logging.DEBUG, "request_id_fallback", host=host, reason=reason)
     return str(uuid.uuid4())
 
 

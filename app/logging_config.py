@@ -1,9 +1,14 @@
 """Logging bootstrap for the service process."""
 
+import contextvars
 import json
 import logging
 import sys
+import traceback
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import cast
 
 LOGGER_NAME = "botasaurus_scrape_api"
@@ -11,14 +16,35 @@ LOGGER_NAME = "botasaurus_scrape_api"
 type LogFieldValue = str | int | float | bool | None
 
 
+_EXC_STACK_MAX_CHARS = 4000
+_request_context: contextvars.ContextVar[Mapping[str, str]] = contextvars.ContextVar(
+    "request_log_context", default=MappingProxyType({})
+)
+
+
 def get_logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
+
+
+@contextmanager
+def request_log_context(**fields: str) -> Generator[None]:
+    """Attach ``fields`` (request_id, host) to every JSON record in this scope.
+
+    Copy the context into worker threads (``contextvars.copy_context().run``).
+    """
+    token = _request_context.set({**_request_context.get(), **fields})
+    try:
+        yield
+    finally:
+        _request_context.reset(token)
 
 
 def log_event(
     logger: logging.Logger,
     level: int,
     event: str,
+    *,
+    exc_info: bool = False,
     **fields: LogFieldValue,
 ) -> None:
     """Emit a named event with typed fields.
@@ -31,15 +57,12 @@ def log_event(
     for key, value in fields.items():
         parts.append(f"{key}={value}")
     message = " ".join(parts)
-    logger.log(level, message, extra={"event_name": event, "event_fields": fields})
-
-
-class HealthAccessFilter(logging.Filter):
-    """Drop uvicorn access records for GET /health."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        return not ('"GET /health' in message or "GET /health " in message)
+    logger.log(
+        level,
+        message,
+        exc_info=exc_info,
+        extra={"event_name": event, "event_fields": fields},
+    )
 
 
 class WebsocketTeardownFilter(logging.Filter):
@@ -62,6 +85,12 @@ class TextFormatter(logging.Formatter):
 
 
 class JsonFormatter(logging.Formatter):
+    """One JSON object per record.
+
+    Event records drop the ``k=v`` ``msg`` (typed fields carry the same data);
+    ``None`` fields are omitted; request context and exceptions are structured.
+    """
+
     def format(self, record: logging.LogRecord) -> str:
         event_name = getattr(record, "event_name", None)
         raw_fields = getattr(record, "event_fields", None)
@@ -69,16 +98,22 @@ class JsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname.lower(),
             "logger": record.name,
-            "msg": record.getMessage(),
         }
         if isinstance(event_name, str):
             payload["event_name"] = event_name
+        else:
+            payload["msg"] = record.getMessage()
+        payload.update(_request_context.get())
         if isinstance(raw_fields, dict):
             fields = cast(dict[str, LogFieldValue], raw_fields)
-            for key, value in fields.items():
-                if key in payload:
-                    continue
-                payload[key] = value
+            payload.update({k: v for k, v in fields.items() if v is not None})
+        if record.exc_info and record.exc_info[1] is not None:
+            exc = record.exc_info[1]
+            payload["exc_type"] = type(exc).__name__
+            payload["exc_message"] = str(exc)
+            payload["exc_stack"] = "".join(
+                traceback.format_exception(*record.exc_info)
+            )[-_EXC_STACK_MAX_CHARS:]
         return json.dumps(payload, default=str, separators=(",", ":"))
 
 
@@ -100,12 +135,10 @@ def setup_logging(
         handler.setFormatter(TextFormatter())
     root.addHandler(handler)
 
-    health_filter = HealthAccessFilter()
     for name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
         uv_logger = logging.getLogger(name)
         uv_logger.handlers.clear()
         uv_logger.propagate = True
-        uv_logger.addFilter(health_filter)
 
     websocket_logger = logging.getLogger("websocket")
     websocket_logger.handlers.clear()

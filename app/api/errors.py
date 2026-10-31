@@ -94,8 +94,16 @@ async def request_schema_validation_handler(
 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> Response:
     del exc
-    logger.exception("unhandled_exception path=%s", request.url.path)
     request_id = resolve_request_id(request.headers.get("X-Request-Id"))
+    log_event(
+        logger,
+        logging.ERROR,
+        "unhandled_exception",
+        exc_info=True,
+        request_id=request_id,
+        method=request.method,
+        path=request.url.path,
+    )
     return json_response(
         validation_error(
             "",

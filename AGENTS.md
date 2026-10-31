@@ -22,7 +22,7 @@ Challenge corpus: `tests/fixtures/challenge/` is the single interstitial fixture
 
 - HTTP tests: `tests/support/http.test_client()` only (lifespan + `dependency_overrides`). No ad-hoc `TestClient(create_app())`.
 - Loggers: `app.logging_config.get_logger()` only.
-- Observability: structured `log_event` JSON is the metrics/analysis surface (`scrape_finished` carries tier, outcome, `vendor`/`signal`, `cookies_sent`, `proxy_configured`). Sentry is error tracking only and receives service-side failures (queue/boot timeouts, pre-navigation failures) — never target-site outcomes, metrics, tracing or profiling.
+- Observability: structured `log_event` JSON is the metrics/analysis surface (`scrape_finished` carries tier, `outcome`, `vendor`/`signal`, `cookies_sent`, `proxy_configured`; level is INFO ok, WARNING target-side, ERROR service-side). Request-scoped events get `request_id`/`host` from `request_log_context` (copy the context into threads). JSON omits null fields and the `msg` text on events, and serialises `exc_info` as `exc_type`/`exc_message`/`exc_stack`. Guard rejections emit `scrape_rejected`; boot emits `service_started`. No uvicorn access log. Sentry is error tracking only and receives service-side failures (queue/boot timeouts, pre-navigation failures) — never target-site outcomes, metrics, tracing or profiling.
 - Wall-clock math: `app/engine/budget.py` only; tiers must not re-derive.
 - Env: add to `Settings` in `config.py`; tests that patch env call `reset_settings_cache()`.
 - Wire types: `app/schemas/` direct imports (`from app.schemas.request import ScrapeRequest`).

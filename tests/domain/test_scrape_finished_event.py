@@ -12,7 +12,13 @@ from app.domain.scrape_service import ScrapeService
 from app.engine import ScraperEngine
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE
 from app.engine.work_lease import LeaseSnapshot
-from app.logging_config import LOGGER_NAME, JsonFormatter, TextFormatter, setup_logging
+from app.logging_config import (
+    LOGGER_NAME,
+    JsonFormatter,
+    TextFormatter,
+    log_event,
+    setup_logging,
+)
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
 from app.schemas.response import (
     ChallengeSignal,
@@ -92,7 +98,8 @@ class ScrapeFinishedEventTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(payload["status"], 200)
                     self.assertEqual(payload["tier"], "http_request")
                     self.assertEqual(payload["execution_mode"], "request")
-                    self.assertIsNone(payload["error_category"])
+                    self.assertNotIn("error_category", payload)
+                    self.assertEqual(payload["outcome"], "ok")
                     self.assertEqual(payload["warm_hit"], False)
                     self.assertEqual(payload["render_ms"], 42)
                     self.assertIn("duration_ms", payload)
@@ -103,7 +110,7 @@ class ScrapeFinishedEventTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 logger.removeHandler(handler)
 
-    async def test_timeout_logs_warning_with_phase_and_request_id(self) -> None:
+    async def test_boot_timeout_logs_error_with_phase_and_request_id(self) -> None:
         timeout_body = ScrapeError(
             url="https://example.com",
             error=TIMEOUT_ERROR_BY_PHASE[TimeoutPhase.BOOT],
@@ -145,7 +152,9 @@ class ScrapeFinishedEventTests(unittest.IsolatedAsyncioTestCase):
             line = stream.getvalue().strip().splitlines()[-1]
             payload = json.loads(line)
             self.assertEqual(payload["event_name"], "scrape_finished")
-            self.assertEqual(payload["level"], "warning")
+            # Boot-phase timeouts are service-side (capacity/Chromium), hence error.
+            self.assertEqual(payload["level"], "error")
+            self.assertEqual(payload["outcome"], "timeout")
             self.assertEqual(payload["request_id"], "req-boot-to")
             self.assertEqual(payload["timeout_phase"], "boot")
             self.assertEqual(payload["error_category"], "timeout")
@@ -195,6 +204,56 @@ class ScrapeFinishedEventTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(payload["cookies_sent"], True)
             self.assertIs(payload["proxy_configured"], False)
             self.assertNotIn("secret-value", output)
+        finally:
+            logger.removeHandler(handler)
+
+    async def test_ssrf_rejection_is_countable_with_request_context(self) -> None:
+        logger, stream, handler = _capture_logger("json")
+        try:
+            outcome = await self.service.process(
+                scrape_request(url="http://127.0.0.1:4010/health"),
+                inbound_request_id="req-ssrf",
+            )
+            self.assertEqual(outcome.status_code, 403)
+            events = [json.loads(line) for line in stream.getvalue().splitlines()]
+            (rejected,) = [
+                e for e in events if e.get("event_name") == "scrape_rejected"
+            ]
+            self.assertEqual(rejected["reason"], "ssrf")
+            self.assertEqual(rejected["status"], 403)
+            self.assertEqual(rejected["level"], "warning")
+            self.assertEqual(rejected["request_id"], "req-ssrf")
+            self.assertEqual(rejected["host"], "127.0.0.1")
+        finally:
+            logger.removeHandler(handler)
+
+    async def test_request_context_reaches_worker_thread_events(self) -> None:
+        success = ScrapeSuccess(
+            url="https://example.com/",
+            html="<html>ok</html>",
+            diagnostics=ScrapeDiagnostics(
+                request_id="req-ctx", execution_tier=ExecutionTier.HTTP_REQUEST
+            ),
+        )
+
+        def work(*_args: object, **_kwargs: object) -> ScrapeSuccess:
+            log_event(logger_in_worker, logging.INFO, "worker_probe")
+            return success
+
+        logger_in_worker = logging.getLogger(LOGGER_NAME)
+        logger, stream, handler = _capture_logger("json")
+        try:
+            with patch.object(self.engine, "execute", side_effect=work):
+                await self.service.process(
+                    scrape_request(
+                        url="https://example.com/", execution_mode="request"
+                    ),
+                    inbound_request_id="req-ctx",
+                )
+            events = [json.loads(line) for line in stream.getvalue().splitlines()]
+            (probe,) = [e for e in events if e.get("event_name") == "worker_probe"]
+            self.assertEqual(probe["request_id"], "req-ctx")
+            self.assertEqual(probe["host"], "example.com")
         finally:
             logger.removeHandler(handler)
 
