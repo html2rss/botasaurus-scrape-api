@@ -13,7 +13,7 @@ from app.engine.budget import (
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.work_lease import WorkLease
 from app.infra.cookies import jar_cookies
-from app.infra.detector import ChallengeDetector
+from app.infra.detector import ChallengeDetector, describe_challenge
 from app.logging_config import get_logger, log_event
 from app.schemas.enums import ErrorCategory, ExecutionMode, ExecutionTier, TimeoutPhase
 from app.schemas.request import ScrapeRequest
@@ -98,6 +98,9 @@ def run_request_tier(
         if payload.execution_mode == ExecutionMode.AUTO and not is_clean_success:
             remaining = remaining_total_seconds(settings, started_monotonic)
             if remaining >= MIN_ESCALATE_REMAINING_SECONDS:
+                vendor, signal = describe_challenge(
+                    assessment.detected_marker, blocked=assessment.blocked_detected
+                )
                 log_event(
                     logger,
                     logging.INFO,
@@ -107,6 +110,9 @@ def run_request_tier(
                     status=status_code,
                     blocked=assessment.blocked_detected,
                     challenge=assessment.challenge_detected,
+                    marker=assessment.detected_marker,
+                    vendor=vendor,
+                    signal=signal,
                     remaining=remaining,
                 )
                 return None

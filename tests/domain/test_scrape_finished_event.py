@@ -14,7 +14,12 @@ from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE
 from app.engine.work_lease import LeaseSnapshot
 from app.logging_config import LOGGER_NAME, JsonFormatter, TextFormatter, setup_logging
 from app.schemas.enums import ErrorCategory, ExecutionTier, TimeoutPhase
-from app.schemas.response import ScrapeDiagnostics, ScrapeError, ScrapeSuccess
+from app.schemas.response import (
+    ChallengeSignal,
+    ScrapeDiagnostics,
+    ScrapeError,
+    ScrapeSuccess,
+)
 from tests.support.factories import scrape_request
 
 
@@ -147,6 +152,49 @@ class ScrapeFinishedEventTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(payload["status"], 504)
             self.assertEqual(payload["warm_hit"], True)
             self.assertNotIn("scrape_timeout", stream.getvalue())
+        finally:
+            logger.removeHandler(handler)
+
+    async def test_challenge_block_logs_vendor_signal_and_request_inputs(self) -> None:
+        blocked = ScrapeError(
+            url="https://www.reuters.com/technology/",
+            error="Bot challenge detected (captcha-delivery.com)",
+            error_category=ErrorCategory.CHALLENGE_BLOCK,
+            diagnostics=ScrapeDiagnostics(
+                request_id="req-blocked",
+                attempts=1,
+                execution_tier=ExecutionTier.BROWSER_DRIVER,
+                challenge=ChallengeSignal(
+                    blocked=True, detected=True, marker="captcha-delivery.com"
+                ),
+            ),
+        )
+
+        async def blocked_run(*, host: str, work: object) -> ScrapeError:
+            del host, work
+            return blocked
+
+        logger, stream, handler = _capture_logger("json")
+        try:
+            with patch("app.domain.scrape_service.WorkLease") as lease_cls:
+                lease = MagicMock()
+                lease.run = blocked_run
+                lease.snapshot = MagicMock(return_value=LeaseSnapshot(warm_hit=False))
+                lease_cls.return_value = lease
+                await self.service.process(
+                    scrape_request(
+                        execution_mode="browser",
+                        cookies={"datadome": "secret-value"},
+                    )
+                )
+            output = stream.getvalue()
+            payload = json.loads(output.strip().splitlines()[-1])
+            self.assertEqual(payload["vendor"], "datadome")
+            self.assertEqual(payload["signal"], "html")
+            self.assertEqual(payload["marker"], "captcha-delivery.com")
+            self.assertIs(payload["cookies_sent"], True)
+            self.assertIs(payload["proxy_configured"], False)
+            self.assertNotIn("secret-value", output)
         finally:
             logger.removeHandler(handler)
 

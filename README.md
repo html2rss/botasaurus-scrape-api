@@ -345,15 +345,13 @@ Use a **separate Sentry project** from html2rss-web (`BOTASAURUS_SENTRY_DSN` →
 | `SENTRY_DSN` | _(unset)_ | Project DSN (`Settings.sentry.dsn`). |
 | `SENTRY_ENVIRONMENT` | `production` | Deployment tag (`Settings.sentry.environment`; `ENVIRONMENT` fallback). |
 | `SENTRY_RELEASE` | image git SHA | Release tag on events (`Settings.sentry.release`). Published images bake the commit SHA via `GIT_SHA` build-arg; override at runtime if needed. |
-| `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | APM traces (`Settings.sentry.traces_sample_rate`; off by default). |
-| `SENTRY_PROFILES_SAMPLE_RATE` | `0.0` | Profiling sample rate (`Settings.sentry.profiles_sample_rate`). |
 | `SENTRY_SEND_DEFAULT_PII` | `false` | Send default PII when `true` (`Settings.sentry.send_default_pii`). |
 
-**Signal routing:** `navigation_error` and `timeout` → grouped Sentry Issues. `challenge_block` → `scrape.challenge_block` metric only; engine stdout keeps the detailed log line. Traces stay off unless you raise `SENTRY_TRACES_SAMPLE_RATE`.
+**Signal routing:** Sentry is error tracking only (no metrics, tracing or profiling). Only *service-side* failures become grouped Issues: `queue`/`boot` timeouts and failures before any navigation attempt (browser boot, storage). Target-site outcomes (`challenge_block`, `work` timeouts, navigation errors on the page) are product signals: query them from the structured `scrape_finished` log event in your log pipeline.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `LOG_FORMAT` | `text` | Log line format. `text` keeps `event k=v` messages (smoke greps). `json` emits one JSON object per line with `ts`, `level`, `logger`, `event_name`, `msg`, and typed fields for collectors. Each admitted scrape emits one terminal `scrape_finished` event (`request_id`, host, modes, tier, status, error_category, timeout_phase, attempts, warm_hit, render_ms, duration_ms). |
+| `LOG_FORMAT` | `text` | Log line format. `text` keeps `event k=v` messages (smoke greps). `json` emits one JSON object per line with `ts`, `level`, `logger`, `event_name`, `msg`, and typed fields for collectors. Each admitted scrape emits one terminal `scrape_finished` event (`request_id`, host, modes, tier, status, error_category, timeout_phase, attempts, warm_hit, cookies_sent, proxy_configured, marker, vendor, signal, render_ms, duration_ms). `vendor` (`datadome`, `cloudflare`, `vercel`, `unknown`) and `signal` (`html`, `header`, `status`, `driver`, `surface`) are set on `challenge_block` only. `request_tier_escalating` and `scrape_challenge_detected` carry the same `marker`/`vendor`/`signal` fields. |
 | `SCRAPE_MAX_WORKERS` | `4` | Threadpool worker limit for sync browser execution. On low-RAM hosts (for example Docker with `--memory=768m` or a 1–2 vCPU VM), use `1` or `2` to limit concurrent Chromium boots; higher values increase queue wait and swap pressure without improving wall time. |
 | `SCRAPE_TIMEOUT_SECONDS` | `45` | Handler wall-clock budget in seconds (queue, browser boot, and work). |
 | `SCRAPE_WORK_TIMEOUT_SECONDS` | `30` | Post-boot navigate, selector wait, and scroll budget in seconds. |

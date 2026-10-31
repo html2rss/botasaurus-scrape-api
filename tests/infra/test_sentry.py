@@ -70,7 +70,8 @@ class SentryIntegrationTests(unittest.TestCase):
             init_kwargs = mock_init.call_args.kwargs
             self.assertEqual(init_kwargs["dsn"], dsn)
             self.assertEqual(init_kwargs["environment"], "production")
-            self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
+            self.assertNotIn("traces_sample_rate", init_kwargs)
+            self.assertNotIn("profiles_sample_rate", init_kwargs)
             self.assertFalse(init_kwargs["send_default_pii"])
             self.assertIs(init_kwargs["before_send"], sentry_mod._before_send)
             integration_names = [
@@ -92,8 +93,6 @@ class SentryIntegrationTests(unittest.TestCase):
                 SENTRY_DSN=dsn,
                 SENTRY_ENVIRONMENT="staging",
                 SENTRY_RELEASE="v2.0.0+abc1234",
-                SENTRY_TRACES_SAMPLE_RATE="0.25",
-                SENTRY_PROFILES_SAMPLE_RATE="0.10",
                 SENTRY_SEND_DEFAULT_PII="true",
             ),
             patch("sentry_sdk.init") as mock_init,
@@ -106,22 +105,8 @@ class SentryIntegrationTests(unittest.TestCase):
             self.assertEqual(init_kwargs["dsn"], dsn)
             self.assertEqual(init_kwargs["environment"], "staging")
             self.assertEqual(init_kwargs["release"], "v2.0.0+abc1234")
-            self.assertEqual(init_kwargs["traces_sample_rate"], 0.25)
-            self.assertEqual(init_kwargs["profiles_sample_rate"], 0.10)
             self.assertTrue(init_kwargs["send_default_pii"])
             self.assertIs(init_kwargs["before_send"], sentry_mod._before_send)
-
-    def test_before_send_drops_challenge_block_issues(self):
-        dropped = sentry_mod._before_send(
-            {"tags": {"error_category": "challenge_block"}}, {}
-        )
-        self.assertIsNone(dropped)
-
-        kept = sentry_mod._before_send(
-            {"tags": {"error_category": "navigation_error"}}, {}
-        )
-        assert kept is not None
-        self.assertEqual(kept.get("tags", {}).get("error_category"), "navigation_error")
 
     def test_before_send_drops_websocket_teardown(self):
         dropped = sentry_mod._before_send(
@@ -135,29 +120,6 @@ class SentryIntegrationTests(unittest.TestCase):
 
         kept = sentry_mod._before_send({"logger": "botasaurus_scrape_api"}, {})
         self.assertIsNotNone(kept)
-
-    def test_setup_sentry_clamps_sample_rates_and_handles_invalid_floats(self):
-        dsn = "https://key@o123.ingest.sentry.io/456"
-        with (
-            env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="invalid_float"),
-            patch("sentry_sdk.init") as mock_init,
-        ):
-            result = sentry_mod.setup_sentry()
-            self.assertTrue(result)
-            mock_init.assert_called_once()
-            init_kwargs = mock_init.call_args.kwargs
-            self.assertEqual(init_kwargs["traces_sample_rate"], 0.0)
-
-        sentry_mod._initialized = False
-        with (
-            env(SENTRY_DSN=dsn, SENTRY_TRACES_SAMPLE_RATE="2.5"),
-            patch("sentry_sdk.init") as mock_init,
-        ):
-            result = sentry_mod.setup_sentry()
-            self.assertTrue(result)
-            mock_init.assert_called_once()
-            init_kwargs = mock_init.call_args.kwargs
-            self.assertEqual(init_kwargs["traces_sample_rate"], 1.0)
 
     def test_flush_sentry_noop_when_not_initialized(self):
         with patch("sentry_sdk.flush") as mock_flush:

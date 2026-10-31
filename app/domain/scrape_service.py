@@ -11,6 +11,7 @@ from app.engine import ScraperEngine
 from app.engine.budget import elapsed_ms
 from app.engine.work_lease import HostConcurrencyGate, LeaseSnapshot, WorkLease
 from app.exceptions import RequestIdCollisionError
+from app.infra.detector import describe_challenge
 from app.infra.ops_telemetry import emit_terminal_telemetry
 from app.infra.request_id import resolve_request_id
 from app.logging_config import get_logger, log_event
@@ -63,6 +64,11 @@ def _emit_scrape_finished(
         and body.error_category == ErrorCategory.TIMEOUT
         else logging.INFO
     )
+    challenge = diagnostics.challenge
+    vendor, signal = describe_challenge(
+        challenge.marker if challenge else None,
+        blocked=bool(challenge and challenge.blocked),
+    )
     log_event(
         logger,
         level,
@@ -77,6 +83,11 @@ def _emit_scrape_finished(
         timeout_phase=timeout_phase,
         attempts=diagnostics.attempts,
         warm_hit=snapshot.warm_hit,
+        cookies_sent=bool(payload.cookies),
+        proxy_configured=bool(payload.proxy),
+        marker=challenge.marker if challenge else None,
+        vendor=vendor if error_category == ErrorCategory.CHALLENGE_BLOCK else None,
+        signal=signal if error_category == ErrorCategory.CHALLENGE_BLOCK else None,
         render_ms=diagnostics.render_ms,
         duration_ms=elapsed_ms(started_monotonic),
     )
