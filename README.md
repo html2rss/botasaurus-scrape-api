@@ -185,7 +185,6 @@ Request options (contract):
   - `get`: only `get`
   - `google_get`: only `google_get`
   - `google_get_bypass`: only `google_get(bypass_cloudflare=true)`
-  - `organic_get`: only `organic_get`
 - `max_retries`: `0..3`, default `2` (attempts = `1 + max_retries`, with `auto` capped by 3 strategy steps).
 - `wait_for_selector`: if set, response waits for selector before capture (routes to browser tier).
 - `wait_timeout_seconds`: selector wait timeout (default `15`). Values outside `[1, SCRAPE_WORK_TIMEOUT_SECONDS]` (default `30`) are clamped into that range so scrape still runs.

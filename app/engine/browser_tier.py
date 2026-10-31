@@ -83,7 +83,7 @@ def settle_page_state(
     if assessment.is_clean:
         return html, meta, assessment, harvest_xhr(collector, driver)
 
-    call_if_available(driver, "bypass_cloudflare")
+    call_if_available(driver, "detect_and_bypass_cloudflare")
     xhr_responses = harvest_xhr(collector, driver)
     html, meta, assessment = _page_state(driver, target_url)
     return html, meta, assessment, xhr_responses

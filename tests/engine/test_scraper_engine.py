@@ -168,15 +168,13 @@ class ScraperEngineUnitTests(unittest.TestCase):
         self.assertNotIn("html", err_dump)
         self.assertNotIn("xhr_responses", err_dump)
 
-    def test_wait_for_readiness_uses_sleep_random_when_available(self):
+    def test_wait_for_readiness_uses_short_random_sleep_when_available(self):
         mock_driver = MagicMock()
-        mock_driver.sleep_random = MagicMock()
+        mock_driver.short_random_sleep = MagicMock()
         mock_driver.page_html = "<html><body>ok</body></html>"
         mock_driver.is_bot_detected.return_value = False
-        mock_driver.is_in_challenge.return_value = False
-        mock_driver.is_blocked.return_value = False
         result = wait_for_readiness(mock_driver, selector=None, timeout_seconds=10)
-        mock_driver.sleep_random.assert_called_once_with(0.5, 1.2)
+        mock_driver.short_random_sleep.assert_called_once_with()
         self.assertIsNone(result)
 
     def test_wait_for_readiness_chunks_selector_and_surfaces_challenge(self):

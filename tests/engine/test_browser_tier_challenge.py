@@ -78,6 +78,21 @@ class _SoftChallengeDriver(_ScenarioDriver):
     page_body = "<html>Just a moment...</html>"
 
 
+class BrowserTierBypassTests(unittest.TestCase):
+    def test_settle_invokes_cloudflare_bypass_on_challenge(self) -> None:
+        from unittest.mock import MagicMock
+
+        from app.engine.browser_tier import settle_page_state
+        from app.infra.xhr_collector import XhrCollector
+
+        driver = MagicMock()
+        driver.page_html = "<title>Just a moment...</title>"
+        settle_page_state(
+            driver, "https://example.com", XhrCollector("https://example.com")
+        )
+        driver.detect_and_bypass_cloudflare.assert_called_once_with()
+
+
 class BrowserTierChallengeTests(unittest.TestCase):
     def _execute(
         self,

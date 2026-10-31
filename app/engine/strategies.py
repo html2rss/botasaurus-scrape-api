@@ -65,9 +65,7 @@ def navigate(
     strategy: NavigationMode,
     timeout_seconds: int,
 ) -> None:
-    if strategy == NavigationMode.ORGANIC_GET:
-        method = _driver_method(driver, "organic_get", "google_get")
-    elif strategy.value.startswith("google_get"):
+    if strategy.value.startswith("google_get"):
         method = _driver_method(driver, "google_get")
     else:
         method = driver.get
@@ -142,7 +140,7 @@ def wait_for_readiness(
     closed before the full wait budget burns. Non-selector settles probe once.
     """
     if not selector:
-        if not capability_available(driver, "sleep_random", 0.5, 1.2):
+        if not capability_available(driver, "short_random_sleep"):
             driver.sleep(1)
         return _mid_wait_challenge(driver)
 
@@ -178,7 +176,7 @@ def apply_scrolling(driver: DriverProtocol) -> None:
             "window.scrollTo(0, document.body.scrollHeight);",
         )
 
-    if not capability_available(driver, "sleep_random", 0.4, 0.9):
+    if not capability_available(driver, "short_random_sleep"):
         call_quietly(driver, "sleep", 0.5)
 
 

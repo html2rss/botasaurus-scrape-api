@@ -45,9 +45,6 @@ class FakeDriver:
     def google_get(self, *_args: object, **_kwargs: Any) -> None:
         return None
 
-    def organic_get(self, *_args: object, **_kwargs: Any) -> None:
-        return None
-
     def wait_for_element(self, *_args: object, **_kwargs: Any) -> None:
         raise RuntimeError("missing selector")
 
@@ -60,7 +57,7 @@ class FakeDriver:
     def sleep(self, *_args: object, **_kwargs: Any) -> None:
         return None
 
-    def sleep_random(self, *_args: object, **_kwargs: Any) -> None:
+    def short_random_sleep(self) -> None:
         return None
 
     def run_js(self, _script: str) -> None:
@@ -72,7 +69,7 @@ class FakeDriver:
     def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
         return None
 
-    def bypass_cloudflare(self) -> None:
+    def detect_and_bypass_cloudflare(self) -> None:
         return None
 
     def close(self) -> None:
@@ -138,11 +135,6 @@ class TrackingDriver(FakeDriver):
     def google_get(self, *_args: object, **_kwargs: Any) -> None:
         if _args and isinstance(_args[0], str):
             self.state.navigation.append(f"google_get:{_args[0]}")
-        return None
-
-    def organic_get(self, *_args: object, **_kwargs: Any) -> None:
-        if _args and isinstance(_args[0], str):
-            self.state.navigation.append(f"organic_get:{_args[0]}")
         return None
 
 

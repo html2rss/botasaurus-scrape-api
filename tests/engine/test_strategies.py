@@ -28,14 +28,6 @@ class StrategyTests(unittest.TestCase):
             resolve_strategies(NavigationMode.GET, 2),
             [NavigationMode.GET, NavigationMode.GET, NavigationMode.GET],
         )
-        self.assertEqual(
-            resolve_strategies(NavigationMode.ORGANIC_GET, 2),
-            [
-                NavigationMode.ORGANIC_GET,
-                NavigationMode.ORGANIC_GET,
-                NavigationMode.ORGANIC_GET,
-            ],
-        )
 
     def test_apply_scrolling(self) -> None:
         mock_driver = MagicMock()

@@ -16,7 +16,6 @@ _CHALLENGE_MARKERS: tuple[str, ...] = (
     "cdn-cgi/challenge-platform",
     "cloudflare ray id",
     "captcha-delivery.com",
-    "datadome",
     "Vercel Security Checkpoint",
     "checking the security",
     "vercel.com/security",
@@ -28,8 +27,6 @@ _CHALLENGE_MARKERS_PAIRS: tuple[tuple[str, str], ...] = tuple(
 
 _DRIVER_SIGNAL_METHODS: tuple[tuple[str, str], ...] = (
     ("is_bot_detected", "botasaurus_driver_bot_detected"),
-    ("is_in_challenge", "botasaurus_driver_challenge"),
-    ("is_blocked", "botasaurus_driver_blocked"),
 )
 
 

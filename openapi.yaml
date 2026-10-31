@@ -277,7 +277,6 @@ components:
       - get
       - google_get
       - google_get_bypass
-      - organic_get
       title: NavigationMode
     ScrapeDiagnostics:
       properties:

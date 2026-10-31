@@ -12,7 +12,6 @@ class NavigationMode(StrEnum):
     GET = "get"
     GOOGLE_GET = "google_get"
     GOOGLE_GET_BYPASS = "google_get_bypass"
-    ORGANIC_GET = "organic_get"
 
 
 class ExecutionTier(StrEnum):

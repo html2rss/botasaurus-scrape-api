@@ -28,6 +28,10 @@ class ChallengeCorpusTests(unittest.TestCase):
         assessment = ChallengeDetector.detect(html, 200)
         self.assertTrue(assessment.is_clean)
 
+    def test_clean_page_embedding_datadome_tag_is_clean(self) -> None:
+        html = (_FIXTURE_DIR / "clean_datadome_tag.html").read_text()
+        self.assertTrue(ChallengeDetector.detect(html, 200).is_clean)
+
     def test_cloudflare_fixture_reports_marker(self) -> None:
         html = (_FIXTURE_DIR / "cloudflare_interstitial.html").read_text()
         assessment = ChallengeDetector.detect(html, 200)
