@@ -1,5 +1,6 @@
 """Scrape request orchestration between HTTP boundary and execution engine."""
 
+import contextvars
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -12,9 +13,9 @@ from app.engine.budget import elapsed_ms
 from app.engine.work_lease import HostConcurrencyGate, LeaseSnapshot, WorkLease
 from app.exceptions import RequestIdCollisionError
 from app.infra.detector import describe_challenge
-from app.infra.ops_telemetry import emit_terminal_telemetry
+from app.infra.ops_telemetry import emit_terminal_telemetry, is_service_side_failure
 from app.infra.request_id import resolve_request_id
-from app.logging_config import get_logger, log_event
+from app.logging_config import get_logger, log_event, request_log_context
 from app.schemas.enums import ErrorCategory
 from app.schemas.request import ScrapeRequest
 from app.schemas.response import (
@@ -32,6 +33,17 @@ logger = get_logger()
 class ScrapeOutcome:
     body: ScrapeSuccess | ScrapeError
     status_code: int
+
+
+def _outcome_and_level(body: ScrapeSuccess | ScrapeError) -> tuple[str, int]:
+    """``outcome`` label and log level: INFO ok, WARNING target-side, ERROR service-side."""
+    if isinstance(body, ScrapeSuccess):
+        return "ok", logging.INFO
+    if is_service_side_failure(body):
+        return body.error_category.value, logging.ERROR
+    if body.error_category == ErrorCategory.VALIDATION:
+        return body.error_category.value, logging.INFO
+    return body.error_category.value, logging.WARNING
 
 
 def _emit_scrape_finished(
@@ -58,12 +70,7 @@ def _emit_scrape_finished(
         if diagnostics.execution_tier is not None
         else None
     )
-    level = (
-        logging.WARNING
-        if isinstance(body, ScrapeError)
-        and body.error_category == ErrorCategory.TIMEOUT
-        else logging.INFO
-    )
+    outcome, level = _outcome_and_level(body)
     challenge = diagnostics.challenge
     vendor, signal = describe_challenge(
         challenge.marker if challenge else None,
@@ -79,6 +86,7 @@ def _emit_scrape_finished(
         navigation_mode=payload.navigation_mode.value,
         tier=tier,
         status=status_code,
+        outcome=outcome,
         error_category=error_category,
         timeout_phase=timeout_phase,
         attempts=diagnostics.attempts,
@@ -121,6 +129,17 @@ def _finish_outcome(
     return ScrapeOutcome(body=body, status_code=status_code)
 
 
+def _log_rejected(reason: str, status_code: int) -> None:
+    """Guard rejections never reach the engine; keep them countable."""
+    log_event(
+        logger,
+        logging.WARNING if reason in {"ssrf", "proxy"} else logging.INFO,
+        "scrape_rejected",
+        reason=reason,
+        status=status_code,
+    )
+
+
 class ScrapeService:
     """Owns request-id resolution, URL guardrails, WorkLease execution, status mapping."""
 
@@ -147,10 +166,11 @@ class ScrapeService:
         target_url = str(payload.url)
         host = payload.url.host
         request_id = resolve_request_id(inbound_request_id, host=host)
-        blocked = self._guard_outcome(payload, target_url, request_id=request_id)
-        if blocked is not None:
-            return blocked
-        return await self._run(payload, request_id=request_id)
+        with request_log_context(request_id=request_id, host=host or ""):
+            blocked = self._guard_outcome(payload, target_url, request_id=request_id)
+            if blocked is not None:
+                return blocked
+            return await self._run(payload, request_id=request_id)
 
     def _guard_outcome(
         self,
@@ -161,6 +181,10 @@ class ScrapeService:
     ) -> ScrapeOutcome | None:
         target_validation = UrlGuard.validate(target_url)
         if not target_validation.is_allowed:
+            _log_rejected(
+                "ssrf" if target_validation.status_code == 403 else "resolution",
+                target_validation.status_code,
+            )
             return self._validation_outcome(
                 target_url,
                 target_validation,
@@ -170,6 +194,7 @@ class ScrapeService:
         if payload.proxy:
             proxy_validation = UrlGuard.validate_proxy(str(payload.proxy))
             if not proxy_validation.is_allowed:
+                _log_rejected("proxy", proxy_validation.status_code)
                 return self._validation_outcome(
                     target_url,
                     proxy_validation,
@@ -214,12 +239,16 @@ class ScrapeService:
         try:
             result = await lease.run(
                 host=host,
+                # Worker threads inherit request_id/host log context.
                 work=partial(
-                    self.engine.execute,
-                    payload,
-                    deadline_monotonic,
-                    request_id=request_id,
-                    lease=lease,
+                    contextvars.copy_context().run,
+                    partial(
+                        self.engine.execute,
+                        payload,
+                        deadline_monotonic,
+                        request_id=request_id,
+                        lease=lease,
+                    ),
                 ),
             )
         except RequestIdCollisionError:

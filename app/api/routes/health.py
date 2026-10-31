@@ -1,24 +1,18 @@
 """Health probe routes."""
 
-from importlib.metadata import PackageNotFoundError, version
-
 from fastapi import APIRouter
 
 from app.api.openapi import get_health_responses
 from app.constants import SERVICE_NAME
+from app.infra.version import botasaurus_version
 from app.schemas.response import HealthResponse
 
 
 def _health() -> HealthResponse:
-    try:
-        botasaurus_version = version("botasaurus")
-    except PackageNotFoundError:
-        botasaurus_version = "unknown"
-
     return HealthResponse(
         status="ok",
         service=SERVICE_NAME,
-        botasaurus_version=botasaurus_version,
+        botasaurus_version=botasaurus_version(),
     )
 
 
