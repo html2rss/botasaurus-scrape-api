@@ -253,6 +253,7 @@ Field behavior:
 - `headers`, `status_code`, `final_url`: best-effort metadata and may be `null`. When `html` is present, document `headers` `content-type` is `text/html; charset=utf-8`.
 - `error`: failure message on `ScrapeError`.
 - `metadata_error`: populated when metadata extraction fails but HTML scrape succeeds.
+- `cookies`: always-on additive name/value map of cookies set for the target host during the scrape (e.g. an anti-bot clearance cookie). Send it back in the `cookies` request field to reuse the session; the service itself stays stateless. Success responses only.
 - `diagnostics.request_id`: unique per request for tracing.
 - `diagnostics.attempts`: actual attempts performed.
 - `diagnostics.strategy_used`: browser navigation strategy on the final attempt, or `null` on the HTTP-request tier.

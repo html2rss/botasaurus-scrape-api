@@ -24,6 +24,7 @@ def build_scrape_success_example() -> OpenApiExampleDict:
         html="<!doctype html><html><body>Example Domain</body></html>",
         metadata_error=None,
         xhr_responses=[],
+        cookies={},
         diagnostics=ScrapeDiagnostics(
             request_id="b01ef2f8-f641-4e75-8ef2-0b73f7b4f372",
             attempts=1,

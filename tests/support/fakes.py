@@ -3,6 +3,7 @@
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from http.cookiejar import CookieJar
 from typing import Any, ClassVar, cast
 
 from app.engine.driver_protocol import CdpTabProtocol, DriverProtocol
@@ -65,6 +66,9 @@ class FakeDriver:
 
     def add_cookies(self, _cookies: list[dict[str, str]]) -> None:
         return None
+
+    def get_cookies(self) -> list[dict[str, Any]]:
+        return []
 
     def detect_and_bypass_cloudflare(self) -> None:
         return None
@@ -185,6 +189,7 @@ class FakeHttpResponse:
         self.status_code = status_code
         self.headers = headers
         self.url = url
+        self.cookies = CookieJar()
 
 
 class FakeRequest:
