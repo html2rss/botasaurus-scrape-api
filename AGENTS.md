@@ -27,9 +27,9 @@ Challenge corpus: `tests/fixtures/challenge/` is the single interstitial fixture
 - Wire types: `app/schemas/` direct imports (`from app.schemas.request import ScrapeRequest`).
 - Domain logic out of routes and Pydantic shells. Typed exceptions (`RequestIdCollisionError`), not message matching.
 - `NavigationMode` end-to-end; no raw strategy strings outside enum boundaries.
-- Optional driver methods: `driver_capabilities.call_if_available` / `resolve_callable` only — no ad-hoc `getattr`.
+- Driver calls are direct and typed via `driver_protocol` (`DriverProtocol`/`TabProtocol`); no string-based `getattr` lookups. Declare only members the real `Driver`/`Tab` have — `tests/engine/test_driver_contract.py` enforces it. Best-effort close: `close_driver`.
 - OpenAPI examples: `openapi_examples.py` model instances. `create_router()` included from `create_app()` **after** `configure_openapi(settings)`.
-- Botasaurus/CDP imports stay function-local inside `run_request_tier`, `create_driver_from_fingerprint`, and `XhrCollector` so tests can patch the vendor module. Do not use `lazy` or `__lazy_modules__` for those.
+- Botasaurus/CDP imports stay function-local inside `run_request_tier`, `create_driver_from_fingerprint`, `configure_driver` (extra headers), and `XhrCollector` so tests can patch the vendor module. Do not use `lazy` or `__lazy_modules__` for those.
 - One `ScraperEngine` + one `ThreadPoolExecutor` on `app.state` from lifespan; deps read `request.app.state`. Shutdown: `executor.shutdown(wait=False, cancel_futures=True)`.
 - Do not freeze settings at import. Hot path injects `Settings`; no `get_settings()` fallback. `clamp_wait_timeout_seconds` reads live `get_settings()`.
 - Types: `make typecheck` = `pyright` strict on `app tests`. Stubs in `typings/`; CDP in `app/infra/cdp_types.py`; seams `DriverProtocol` / `CdpTabProtocol`. Tests: `tests/support/factories.py`, `tests/support/fakes.py`. Prefer fixing types over `# pyright:` escapes.

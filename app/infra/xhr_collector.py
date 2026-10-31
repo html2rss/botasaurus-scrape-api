@@ -10,7 +10,7 @@ import base64
 import threading
 from typing import cast
 
-from app.engine.driver_capabilities import CdpTabProtocol
+from app.engine.driver_protocol import CdpTabProtocol
 from app.infra.cdp_types import PendingXhrMeta
 from app.logging_config import get_logger
 from app.schemas.response import XhrResponse

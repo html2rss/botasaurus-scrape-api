@@ -180,7 +180,7 @@ class ScraperEngineUnitTests(unittest.TestCase):
     def test_wait_for_readiness_chunks_selector_and_surfaces_challenge(self):
         from typing import cast
 
-        from app.engine.driver_capabilities import DriverProtocol
+        from app.engine.driver_protocol import DriverProtocol
         from app.engine.strategies import wait_for_readiness as readiness
 
         class _ChunkDriver(FakeDriver):

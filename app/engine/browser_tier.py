@@ -11,7 +11,7 @@ from app.engine.budget import (
     elapsed_ms,
     is_timeout_exception,
 )
-from app.engine.driver_capabilities import DriverProtocol, call_if_available
+from app.engine.driver_protocol import DriverProtocol
 from app.engine.envelope import TIMEOUT_ERROR_BY_PHASE, build_error, build_success
 from app.engine.session import ScrapeSession
 from app.engine.strategies import (
@@ -83,7 +83,7 @@ def settle_page_state(
     if assessment.is_clean:
         return html, meta, assessment, harvest_xhr(collector, driver)
 
-    call_if_available(driver, "detect_and_bypass_cloudflare")
+    driver.detect_and_bypass_cloudflare()
     xhr_responses = harvest_xhr(collector, driver)
     html, meta, assessment = _page_state(driver, target_url)
     return html, meta, assessment, xhr_responses

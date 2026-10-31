@@ -4,7 +4,7 @@ import unittest
 from typing import cast
 from unittest.mock import MagicMock
 
-from app.engine.driver_capabilities import DriverProtocol
+from app.engine.driver_protocol import DriverProtocol
 from app.engine.strategies import apply_scrolling, configure_driver, resolve_strategies
 from app.schemas.enums import NavigationMode
 from tests.support.factories import scrape_request
