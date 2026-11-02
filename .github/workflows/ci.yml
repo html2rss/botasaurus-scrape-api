@@ -106,7 +106,7 @@ jobs:
         run: echo "dir=$(python -c 'import importlib.util as u, pathlib; print(pathlib.Path(u.find_spec("botasaurus_requests").origin).parent / "bin")')" >> "$GITHUB_OUTPUT"
 
       - name: Cache botasaurus_requests binary
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ steps.req-bin.outputs.dir }}
           key: botasaurus-requests-bin-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
