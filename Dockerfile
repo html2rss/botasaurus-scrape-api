@@ -28,13 +28,14 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
+COPY scripts/fetch_requests_bin.sh /usr/local/bin/fetch_requests_bin.sh
 COPY --from=builder /build/wheels /wheels
 RUN grep -v '^botasaurus @ git+' /app/requirements.txt > /app/requirements.runtime.txt \
     && echo 'botasaurus' >> /app/requirements.runtime.txt \
     && pip install --no-cache-dir --no-index --find-links /wheels -r /app/requirements.runtime.txt \
-    && python3 -c "import botasaurus.request" \
+    && fetch_requests_bin.sh \
     && chmod -R a+rx "$(python3 -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
-    && rm -f /app/requirements.runtime.txt \
+    && rm -f /app/requirements.runtime.txt /usr/local/bin/fetch_requests_bin.sh \
     && rm -rf /wheels
 
 # Copy application code
