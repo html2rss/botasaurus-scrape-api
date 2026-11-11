@@ -83,3 +83,8 @@ Challenge corpus: `tests/fixtures/challenge/` is the single interstitial fixture
 - API/Docker/error-semantics change → `make smoke` + update README same change.
 - `make smoke` (`SMOKE_PROFILE=all`): `contract-prewarm-off` (build/boot, health, scrape paths, isolation, SSRF, request-tier, headers, `organic_get`, scroll, Sentry sidecar); `prewarm-on-warm-handoff` (`SCRAPE_PREWARM=true`, cold then warm `warm_hit`). CI titles: `Smoke (prewarm=false, cold)`, `Smoke (prewarm=true, warm-handoff)`. Image job: `docker-smoke-image` (`scope=smoke-linux-amd64`); matrix: `cache-from` + `SMOKE_SKIP_BUILD=1`.
 - Commits scoped (infra vs API vs docs).
+
+## Image Publish
+
+- Docker Publish runs after a green `CI` on `main` from a push or `workflow_dispatch`; it tags `:latest` and `:<sha>`.
+- Dependabot auto-merges push with `GITHUB_TOKEN`, which starts no workflow, so that commit gets no image. Publish it with `gh workflow run ci.yml --ref main`, then confirm the `:<sha>` tag exists before pinning it downstream.
