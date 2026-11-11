@@ -103,21 +103,19 @@ jobs:
       # import time; shared runner IPs hit the rate limit. Cache it and retry the warm-up.
       - name: Locate botasaurus_requests binary dir
         id: req-bin
-        run: echo "dir=$(python -c 'import importlib.util as u, pathlib; print(pathlib.Path(u.find_spec("botasaurus_requests").origin).parent / "bin")')" >> "$GITHUB_OUTPUT"
+        run: |
+          pkg="$(python -c 'import importlib.util as u, pathlib; print(pathlib.Path(u.find_spec("botasaurus_requests").origin).parent)')"
+          echo "dir=$pkg/bin" >> "$GITHUB_OUTPUT"
+          echo "bridge=$(sed -n "s/^BRIDGE_VERSION *= *['\"]\(.*\)['\"]/\1/p" "$pkg/__version__.py")" >> "$GITHUB_OUTPUT"
 
       - name: Cache botasaurus_requests binary
         uses: actions/cache@v6
         with:
           path: ${{ steps.req-bin.outputs.dir }}
-          key: botasaurus-requests-bin-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          key: botasaurus-requests-bin-${{ runner.os }}-${{ steps.req-bin.outputs.bridge }}
 
       - name: Warm botasaurus_requests binary
-        run: |
-          for i in 1 2 3 4 5; do
-            python -c "import botasaurus_requests" && exit 0
-            sleep $((i * 30))
-          done
-          exit 1
+        run: scripts/fetch_requests_bin.sh
 
       - name: Execute unit test suite
         run: python -m unittest discover -s tests -p "test_*.py" -v
