@@ -1,6 +1,6 @@
-fastapi==0.162.0
+fastapi==0.162.5
 uvicorn==0.54.0
 pydantic-settings==2.16.2
-sentry-sdk==2.74.0
+sentry-sdk==2.75.0
 botasaurus @ git+https://github.com/omkarcloud/botasaurus.git@7936afad5f8ca78fe0581a9dabd5f7d6964c6b1a
 
